@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div><span class="eyebrow">WORKSPACE</span><h1>Content dashboard</h1><p>Draft once. Shape it for every channel.</p></div>
+    <a class="btn btn-primary" href="{% url 'studio:lesson-create' %}"><i class="bi bi-plus-lg"></i> New lesson</a>
+</div>
+
+<details class="panel onboarding-panel" {% if onboarding_percent < 100 %}open{% endif %}>
+    <summary><span><span class="eyebrow">GETTING STARTED</span><strong>{{ onboarding_completed }} of {{ onboarding_total }} setup steps complete</strong></span><span>{{ onboarding_percent }}%</span></summary>
+    <div class="onboarding-progress" role="progressbar" aria-valuenow="{{ onboarding_percent }}" aria-valuemin="0" aria-valuemax="100"><span style="width: {{ onboarding_percent }}%"></span></div>
+    <div class="onboarding-steps">
+        {% for step in onboarding_steps %}
+        <a class="onboarding-step {% if step.complete %}is-complete{% endif %}" href="{{ step.url }}"><i class="bi {% if step.complete %}bi-check-circle-fill{% else %}bi-circle{% endif %}"></i><span><strong>{{ step.label }}</strong><small>{{ step.description }}</small></span></a>
+        {% endfor %}
+    </div>
+    <a class="onboarding-help" href="{% url 'studio:help' %}">Open the complete step-by-step guide <i class="bi bi-arrow-right"></i></a>
+</details>
+
+<section class="metric-grid">
+    {% for item in lesson_counts %}
+    <article class="metric-card"><span>{{ item.status|title }}</span><strong>{{ item.total }}</strong></article>
+    {% empty %}
+    <article class="metric-card"><span>Lessons</span><strong>0</strong></article>
+    {% endfor %}
+    <article class="metric-card metric-card--accent"><span>Recorded AI cost</span><strong>${{ total_ai_cost|floatformat:4 }}</strong></article>
+</section>
+
+<div class="dashboard-grid">
+    <section class="panel">
+        <div class="panel-heading"><h2>Recently updated</h2><a href="{% url 'studio:lesson-list' %}">View all</a></div>
+        <div class="lesson-list">
+            {% for lesson in recent_lessons %}
+            <a class="lesson-row" href="{{ lesson.get_absolute_url }}">
+                <span class="color-dot" style="--dot: {{ lesson.resolved_accent_color }}"></span>
+                <span class="lesson-row__main"><strong>{{ lesson.title }}</strong><small>{{ lesson.category|default:"Uncategorized" }} · {{ lesson.get_difficulty_display }}</small></span>
+                <span class="status status--{{ lesson.status }}">{{ lesson.get_status_display }}</span>
+            </a>
+            {% empty %}<div class="empty-state">Create your first lesson to begin.</div>{% endfor %}
+        </div>
+    </section>
+    <section class="panel">
+        <div class="panel-heading"><h2>Recent AI runs</h2><span>Cost ledger</span></div>
+        <div class="generation-list">
+            {% for run in recent_generations %}
+            <div class="generation-row"><span><strong>{{ run.get_purpose_display }}</strong><small>{{ run.lesson|default:"No lesson" }} · {{ run.model }}</small></span><span class="text-end"><strong>${{ run.estimated_cost_usd }}</strong><small>{{ run.status }}</small></span></div>
+            {% empty %}<div class="empty-state">No AI generations recorded yet.</div>{% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

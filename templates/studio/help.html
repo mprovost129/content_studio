@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Help and workflow guide{% endblock %}
+{% block content %}
+<div class="page-heading help-heading">
+    <div><span class="eyebrow">OPERATOR GUIDE</span><h1>How to use Content Studio</h1><p>Follow one lesson from an idea to reviewed captions, downloadable graphics, and a website-ready export.</p></div>
+    <a class="btn btn-primary" href="{% url 'studio:lesson-create' %}"><i class="bi bi-plus-lg"></i> Create a lesson</a>
+</div>
+
+<nav class="guide-nav panel" aria-label="Guide sections">
+    <a href="#daily-workflow">Daily workflow</a><a href="#lesson-details">Lesson details</a><a href="#content-blocks">Content blocks</a><a href="#graphics">Graphics</a><a href="#captions">Captions</a><a href="#website">Website</a><a href="#playground">Playground</a><a href="#status">Statuses</a><a href="#troubleshooting">Troubleshooting</a>
+</nav>
+
+<div class="guide-layout">
+    <main class="guide-content">
+        <section class="panel guide-section" id="daily-workflow">
+            <span class="eyebrow">START HERE</span><h2>The recommended daily workflow</h2>
+            <ol class="guide-steps">
+                <li><strong>Create the lesson.</strong><span>Add enough structure to describe the teaching goal. Keep it in Draft while working.</span></li>
+                <li><strong>Add content blocks.</strong><span>Build the explanation in the same order a learner should read it.</span></li>
+                <li><strong>Review the source lesson.</strong><span>Confirm that code, output, terminology, and difficulty are accurate before generating anything.</span></li>
+                <li><strong>Generate graphics.</strong><span>Choose a visual template and the sizes you need for Facebook, Instagram, or Threads.</span></li>
+                <li><strong>Generate captions.</strong><span>Create drafts for selected platforms, edit them, and mark the versions you accept as Approved.</span></li>
+                <li><strong>Preview the website page.</strong><span>Use the SEO score to finish missing metadata, then inspect the private page preview.</span></li>
+                <li><strong>Download and publish manually.</strong><span>Download PNGs and copy approved captions. Meta publishing will be added later.</span></li>
+            </ol>
+        </section>
+
+        <section class="panel guide-section" id="lesson-details">
+            <span class="eyebrow">STEP 1</span><h2>Create the lesson record</h2>
+            <p>The lesson is the source of truth. Graphics, captions, and website exports are derived from it, so make corrections here first.</p>
+            <dl class="guide-definitions"><div><dt>Title</dt><dd>The learner-facing topic. Make it specific enough to recognize in search.</dd></div><div><dt>Summary</dt><dd>One or two sentences describing what the learner will understand or build.</dd></div><div><dt>Difficulty</dt><dd>Beginner, intermediate, advanced, or mixed.</dd></div><div><dt>Category and tags</dt><dd>Used for organization, search, and eventual website discovery.</dd></div><div><dt>Series</dt><dd>Optional grouping for lessons that belong in a sequence.</dd></div><div><dt>SEO fields</dt><dd>Optional while drafting, but complete them before a website export.</dd></div></dl>
+            <div class="guide-note"><strong>Good first pass:</strong> title, summary, Draft status, difficulty, and category. Everything else can be refined later.</div>
+        </section>
+
+        <section class="panel guide-section" id="content-blocks">
+            <span class="eyebrow">STEP 2</span><h2>Build the lesson with content blocks</h2>
+            <p>Select <b>Add block</b> on a lesson. Blocks can be edited, deleted, or moved with the up and down arrows.</p>
+            <div class="block-reference"><article><strong>Explanation</strong><span>Normal teaching text.</span></article><article><strong>Code</strong><span>Runnable source code with preserved spacing.</span></article><article><strong>Output</strong><span>The exact expected result.</span></article><article><strong>Heading</strong><span>A section divider inside a longer lesson.</span></article><article><strong>Callout / tip</strong><span>A warning, shortcut, or important reminder.</span></article><article><strong>List</strong><span>Steps, rules, or related points.</span></article><article><strong>Quiz</strong><span>A knowledge check; optional JSON can hold choices and an answer.</span></article><article><strong>Challenge</strong><span>A task for the learner to complete.</span></article><article><strong>Comparison</strong><span>Before/after or side-by-side concepts.</span></article><article><strong>Image</strong><span>A future-friendly image reference block.</span></article></div>
+            <div class="guide-note"><strong>Recommended order:</strong> short explanation → code → output → explanation or tip → challenge/quiz.</div>
+        </section>
+
+        <section class="panel guide-section" id="graphics">
+            <span class="eyebrow">STEP 3</span><h2>Generate downloadable graphics</h2>
+            <ol><li>Open the lesson and find <b>Generate assets</b>.</li><li>Choose the template that matches the lesson type.</li><li>Select one or more output sizes.</li><li>Select <b>Generate graphics</b>.</li><li>Review every generated slide and use <b>Download PNG</b> for the versions you want.</li></ol>
+            <p>Long content automatically flows across multiple slides. Generated files are also stored under <code>media/generated/</code>.</p>
+        </section>
+
+        <section class="panel guide-section" id="captions">
+            <span class="eyebrow">STEP 4</span><h2>Draft and approve captions</h2>
+            <ol><li>Select Facebook, Instagram, Threads, or any combination.</li><li>Select <b>Generate caption drafts</b>.</li><li>Read each draft for technical accuracy and tone.</li><li>Select <b>Edit or approve</b> to revise the text.</li><li>Change its status to <b>Approved</b> only when it is ready to use.</li></ol>
+            <div class="guide-note"><strong>Cost control:</strong> each request records its model, tokens, duration, status, and estimated cost. Draft generation never publishes a post.</div>
+        </section>
+
+        <section class="panel guide-section" id="website">
+            <span class="eyebrow">STEP 5</span><h2>Preview and export the website lesson</h2>
+            <ol><li>Review the <b>Page readiness</b> score and fix important warnings.</li><li>Open <b>Website preview</b> in a new tab.</li><li>Return to the lesson and select <b>Create website export</b>.</li><li>Download HTML for a standalone page or JSON for future website integration.</li></ol>
+            <p>Exports are numbered and immutable. Creating an export does not publish it to your existing website.</p>
+        </section>
+
+        <section class="panel guide-section" id="playground">
+            <span class="eyebrow">INTERACTIVE LESSONS</span><h2>Enable the Python playground</h2>
+            <ol><li>Edit the lesson and select <b>Enable playground</b>.</li><li>Add at least one Code block that uses browser-compatible Python.</li><li>Open Website preview and select <b>Run code</b>.</li><li>Confirm the displayed output matches the lesson’s Output block.</li></ol>
+            <p>The playground uses a version-pinned Pyodide runtime in a web worker. Learner code runs inside the browser, not on the Django server, and a runaway program is stopped automatically.</p>
+            <div class="guide-note"><strong>Use it for:</strong> Python fundamentals and supported browser packages. Avoid lessons that require local files, operating-system commands, desktop interfaces, private credentials, or a traditional server environment.</div>
+        </section>
+
+        <section class="panel guide-section" id="status">
+            <span class="eyebrow">REFERENCE</span><h2>Lesson statuses</h2>
+            <dl class="guide-definitions"><div><dt>Idea</dt><dd>A topic you have not started developing.</dd></div><div><dt>Draft</dt><dd>Actively writing or generating supporting material.</dd></div><div><dt>In review</dt><dd>Content exists and needs an accuracy or presentation check.</dd></div><div><dt>Ready</dt><dd>Approved for download, scheduling, or publication.</dd></div><div><dt>Published</dt><dd>Already released on at least one intended channel.</dd></div><div><dt>Archived</dt><dd>Retained for history but no longer active.</dd></div></dl>
+        </section>
+
+        <section class="panel guide-section" id="troubleshooting">
+            <span class="eyebrow">WHEN SOMETHING STOPS</span><h2>Quick troubleshooting</h2>
+            <dl class="guide-definitions"><div><dt>The server is not running</dt><dd>Run <code>.\scripts\run_local.cmd</code>, leave that terminal open, and use a second terminal for other commands.</dd></div><div><dt>I cannot sign in</dt><dd>Use the email supplied to <code>createsuperuser</code>. There is no username.</dd></div><div><dt>Caption generation fails</dt><dd>Confirm <code>OPENAI_API_KEY</code> exists in <code>.env</code>. The failed run will be recorded in the dashboard ledger.</dd></div><div><dt>A graphic has too much content</dt><dd>Split large explanations into smaller blocks or allow the renderer to create a carousel.</dd></div><div><dt>My website export has warnings</dt><dd>Add a summary, content blocks, SEO title, SEO description, category, and tags.</dd></div><div><dt>I changed the lesson after exporting</dt><dd>Create a new website export revision. Older revisions remain available for comparison.</dd></div></dl>
+        </section>
+    </main>
+
+    <aside class="guide-sidebar">
+        <section class="panel guide-card"><span class="eyebrow">QUICK START</span><h3>Your next lesson</h3><p>Create a small lesson with one explanation, one code block, and one output block. Generate only an Instagram square and caption until the workflow feels natural.</p><a class="btn btn-primary w-100" href="{% url 'studio:lesson-create' %}">Create a practice lesson</a></section>
+        <section class="panel guide-card"><span class="eyebrow">SAFE BY DEFAULT</span><h3>Nothing auto-publishes</h3><p>AI outputs stay Draft, graphics stay in the studio, and website exports are downloads. You remain the final reviewer.</p></section>
+    </aside>
+</div>
+{% endblock %}

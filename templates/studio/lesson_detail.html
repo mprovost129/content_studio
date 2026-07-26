@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ lesson.title }}{% endblock %}
+{% block content %}
+<div class="page-heading lesson-heading">
+    <div><span class="eyebrow">{{ lesson.get_difficulty_display }}{% if lesson.series %} · {{ lesson.series }}{% endif %}</span><h1>{{ lesson.title }}</h1><p>{{ lesson.summary|default:"Add a summary to guide captions and graphics." }}</p></div>
+    <div class="heading-actions"><span class="status status--{{ lesson.status }}">{{ lesson.get_status_display }}</span>{% if lesson.enable_playground %}<span class="status status--playground"><i class="bi bi-play-fill"></i> Playground</span>{% endif %}<a class="btn btn-secondary" href="{% url 'studio:website-preview' lesson.slug %}" target="_blank" rel="noopener"><i class="bi bi-window"></i> Website preview</a><a class="btn btn-secondary" href="{% url 'studio:lesson-update' lesson.slug %}"><i class="bi bi-pencil"></i> Edit details</a></div>
+</div>
+
+<nav class="lesson-workflow panel" aria-label="Lesson workflow">
+    <span class="eyebrow">WORKFLOW</span>
+    {% for step in lesson_workflow %}<a class="{% if step.complete %}is-complete{% endif %}" href="{{ step.url }}"><i class="bi {% if step.complete %}bi-check-circle-fill{% else %}bi-circle{% endif %}"></i>{{ step.label }}</a>{% endfor %}
+    <a class="workflow-help" href="{% url 'studio:help' %}"><i class="bi bi-question-circle"></i> Guide</a>
+</nav>
+
+<div class="detail-grid">
+    <section class="panel">
+        <div class="panel-heading"><div><span class="eyebrow">SOURCE</span><h2>Content blocks</h2></div><a class="btn btn-sm btn-primary" href="{% url 'studio:block-create' lesson.slug %}"><i class="bi bi-plus-lg"></i> Add block</a></div>
+        <div class="block-list">
+            {% for block in lesson.blocks.all %}
+            <article class="content-block content-block--{{ block.block_type }}">
+                <div class="content-block__heading"><span><b>{{ block.position }}</b>{{ block.get_block_type_display }}</span><span class="block-actions"><form method="post" action="{% url 'studio:block-move' block.pk 'up' %}">{% csrf_token %}<button class="link-button" type="submit" title="Move up">&uarr;</button></form><form method="post" action="{% url 'studio:block-move' block.pk 'down' %}">{% csrf_token %}<button class="link-button" type="submit" title="Move down">&darr;</button></form><a href="{% url 'studio:block-update' block.pk %}">Edit</a><a class="text-danger" href="{% url 'studio:block-delete' block.pk %}">Delete</a></span></div>
+                {% if block.title %}<h3>{{ block.title }}</h3>{% endif %}
+                {% if block.block_type == 'code' or block.block_type == 'output' %}<pre><code>{{ block.content }}</code></pre>{% else %}<div class="block-copy">{{ block.content|linebreaks }}</div>{% endif %}
+            </article>
+            {% empty %}<div class="empty-state">Add explanation, code, output, quiz, or challenge blocks.</div>{% endfor %}
+        </div>
+    </section>
+
+    <aside class="detail-sidebar">
+        <section class="panel action-panel" id="website">
+            <span class="eyebrow">WEBSITE + SEO</span><h2>Page readiness</h2>
+            <div class="seo-score"><strong>{{ seo_diagnostics.score }}</strong><span>/100</span></div>
+            <p>{{ seo_diagnostics.title_length }} title characters &middot; {{ seo_diagnostics.description_length }} description characters</p>
+            {% if seo_diagnostics.issues %}<ul class="diagnostic-list">{% for issue in seo_diagnostics.issues %}<li class="diagnostic diagnostic--{{ issue.level }}">{{ issue.message }}</li>{% endfor %}</ul>{% else %}<p class="diagnostic diagnostic--ready">SEO metadata is ready.</p>{% endif %}
+            <div class="stacked-actions"><a class="btn btn-secondary w-100" href="{% url 'studio:website-preview' lesson.slug %}" target="_blank" rel="noopener">Preview page</a><form method="post" action="{% url 'studio:website-export' lesson.slug %}">{% csrf_token %}<button class="btn btn-primary w-100" type="submit">Create website export</button></form></div>
+        </section>
+        <section class="panel action-panel" id="graphics">
+            <span class="eyebrow">GRAPHICS</span><h2>Generate assets</h2><p>Responsive layouts reflow content and split overflow into slides.</p>
+            <form method="post" action="{% url 'studio:graphic-generate' lesson.slug %}">{% csrf_token %}{{ graphic_form.as_p }}<button class="btn btn-primary w-100" type="submit"><i class="bi bi-image"></i> Generate graphics</button></form>
+        </section>
+        <section class="panel action-panel" id="captions">
+            <span class="eyebrow">OPENAI</span><h2>Draft captions</h2><p>Every request, response, token count, and estimated cost is recorded.</p>
+            <form method="post" action="{% url 'studio:caption-generate' lesson.slug %}">{% csrf_token %}{{ caption_form.as_p }}<button class="btn btn-primary w-100" type="submit"><i class="bi bi-stars"></i> Generate caption drafts</button></form>
+        </section>
+    </aside>
+</div>
+
+<section class="panel output-section">
+    <div class="panel-heading"><div><span class="eyebrow">DOWNLOADS</span><h2>Generated graphics</h2></div></div>
+    <div class="asset-grid">
+        {% for asset in lesson.assets.all %}
+        <article class="asset-card">
+            {% if asset.file %}<a href="{{ asset.file.url }}" target="_blank" rel="noopener"><img src="{{ asset.file.url }}" alt="{{ asset.alt_text }}"></a>{% endif %}
+            <div><strong>{{ asset.get_output_format_display }}</strong><small>Slide {{ asset.slide_number }} · {{ asset.width }}×{{ asset.height }}</small>{% if asset.file %}<a href="{{ asset.file.url }}" download>Download PNG</a>{% endif %}</div>
+        </article>
+        {% empty %}<div class="empty-state">No graphics generated yet.</div>{% endfor %}
+    </div>
+</section>
+
+<section class="panel output-section">
+    <div class="panel-heading"><div><span class="eyebrow">WEBSITE</span><h2>Export history</h2></div></div>
+    <div class="export-list">
+        {% for export in lesson.website_exports.all %}
+        <article><div><strong>Revision {{ export.revision }}</strong><small>{{ export.created_at|date:"M j, Y g:i A" }} &middot; schema {{ export.schema_version }} &middot; {{ export.content_hash|slice:":10" }}</small></div><span><a href="{% url 'studio:website-export-download' export.pk 'json' %}">JSON</a><a href="{% url 'studio:website-export-download' export.pk 'html' %}">HTML</a></span></article>
+        {% empty %}<div class="empty-state">No website exports yet. Preview the page, then create the first revision.</div>{% endfor %}
+    </div>
+</section>
+
+<section class="panel output-section">
+    <div class="panel-heading"><div><span class="eyebrow">DRAFTS</span><h2>Captions</h2></div></div>
+    <div class="caption-grid">
+        {% for caption in lesson.captions.all %}
+        <article class="caption-card"><div class="caption-card__heading"><strong>{{ caption.get_platform_display }}</strong><span>{{ caption.get_status_display }}</span></div><div class="caption-copy">{{ caption.content|linebreaks }}</div>{% if caption.generation %}<small>{{ caption.generation.model }} &middot; ${{ caption.generation.estimated_cost_usd }} &middot; {{ caption.generation.input_tokens|add:caption.generation.output_tokens }} tokens</small>{% endif %}<a class="caption-edit" href="{% url 'studio:caption-update' caption.pk %}">Edit or approve</a></article>
+        {% empty %}<div class="empty-state">No caption drafts yet.</div>{% endfor %}
+    </div>
+</section>
+{% endblock %}
