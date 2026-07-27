@@ -847,6 +847,8 @@ class SubscriberSegmentTests(TestCase):
                 "clicks": 0,
                 "unsubscribes": 0,
                 "bounces": 0,
+                "external_provider": EmailProvider.NONE,
+                "provider_sync_status": ProviderSyncStatus.NOT_CONNECTED,
             },
         )
 
