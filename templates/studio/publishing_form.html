@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ form_title|default:"Publishing record" }}{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div>
+        <span class="eyebrow">{{ lesson.title }}</span>
+        <h1>{{ form_title|default:"Publishing record" }}</h1>
+        <p>Track where this lesson was published, the exact caption used, the graphic used, and post-performance metrics.</p>
+    </div>
+    <a class="btn btn-secondary" href="{{ lesson.get_absolute_url }}#publishing">Back to lesson</a>
+</div>
+<section class="panel form-panel">
+    <form method="post">
+        {% csrf_token %}
+        {% if content_plan %}<input type="hidden" name="plan" value="{{ content_plan.pk }}"><div class="guide-note">This publishing record will mark the planned post as posted.</div>{% endif %}
+        <div class="form-grid">{{ form.as_p }}</div>
+        <button class="btn btn-primary" type="submit">Save publishing record</button>
+    </form>
+</section>
+{% endblock %}

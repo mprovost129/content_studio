@@ -1,17 +1,22 @@
+import csv
 import json
+from datetime import datetime, time, timedelta
 
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.db import transaction
-from django.db.models import Count, Max, Q, Sum
-from django.http import HttpResponse
-from django.shortcuts import get_object_or_404, redirect
+from django.db.models import Count, Max, Q, Prefetch, Sum
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
+from django.views.decorators.http import require_POST
 from django.views.generic import (
     CreateView,
     DeleteView,
     DetailView,
+    FormView,
     ListView,
     TemplateView,
     UpdateView,
@@ -19,30 +24,277 @@ from django.views.generic import (
 
 from .forms import (
     BrandProfileForm,
+    BlockTemplateApplyForm,
     CaptionDraftForm,
     CaptionGenerationForm,
+    CodeChallengeForm,
+    ChallengeTestCaseForm,
+    ContentPlanForm,
     GraphicGenerationForm,
     LessonBlockForm,
     LessonForm,
+    LessonIdeaForm,
+    LearningResourceForm,
+    ResourceCTAForm,
+    ResourceIdeaForm,
+    RecommendationTuningForm,
+    NewsletterSignupForm,
+    NewsletterSubscriberForm,
+    NewsletterCampaignForm,
+    NewsletterMetricImportForm,
+    SubscriberSegmentForm,
+    PublishingRecordForm,
+    QuizChoiceForm,
+    QuizQuestionForm,
+    SocialCarouselTemplateApplyForm,
 )
 from .models import (
     AIGeneration,
     BrandProfile,
     CaptionDraft,
+    CodeChallenge,
+    ChallengeAttempt,
+    ChallengeTestCase,
+    ContentPlan,
+    EmailProvider,
+    LearnerBadge,
+    LearnerBadgeAward,
     Lesson,
+    LearningResource,
     LessonBlock,
+    LessonProgress,
+    NewsletterSubscriber,
+    NewsletterCampaign,
+    NewsletterMetricImport,
+    ResourceLeadMagnetAccess,
+    ResourceCTA,
+    ResourceCTAClickEvent,
+    ResourceCTARecommendationFeedback,
+    ResourceLessonConversionEvent,
+    RecommendationTuning,
+    ResourcePerformanceEvent,
+    ProviderSyncStatus,
+    SubscriberSegment,
+    PublishingRecord,
+    QuizAttempt,
+    QuizChoice,
+    QuizQuestion,
+    Series,
     WebsiteExport,
 )
 from .services.graphics import GraphicGenerationError, generate_graphics
+from .services.lesson_ideas import LessonIdeaDraft, create_lesson_from_idea
+from .services.resource_ideas import ResourceIdeaDraft, create_resource_from_idea
+from .services.resource_pdfs import render_learning_resource_pdf, resource_pdf_filename
+from .services.resource_recommendations import (
+    attach_recommendation_feedback,
+    build_resource_cta_recommendations,
+    create_cta_from_recommendation,
+    mark_recommendation_dismissed,
+)
+from .services.block_templates import apply_block_template_to_lesson, get_block_template, BLOCK_TEMPLATES
+from .services.social_carousels import (
+    SOCIAL_CAROUSEL_TEMPLATES,
+    apply_social_carousel_template_to_lesson,
+    get_social_carousel_template,
+)
 from .services.openai import OpenAIServiceError, generate_caption
 from .services.website import (
     create_website_export,
     render_website_page,
     seo_diagnostics,
 )
+from .services.newsletter_imports import parse_newsletter_metrics
+from .services.provider_readiness import (
+    ISSUE_LABELS,
+    RECORD_TYPE_LABELS,
+    provider_readiness_rows,
+    provider_readiness_summary,
+)
+from .services.seo import (
+    absolute_url,
+    lesson_schema,
+    series_schema,
+    website_schema,
+    lesson_canonical_url,
+    series_canonical_url,
+    resource_canonical_url,
+    resource_schema,
+)
 
 
-class DashboardView(LoginRequiredMixin, TemplateView):
+class StaffRequiredMixin(LoginRequiredMixin, UserPassesTestMixin):
+    def test_func(self):
+        return self.request.user.is_staff
+
+
+staff_required = user_passes_test(lambda user: user.is_staff, login_url="login")
+
+
+def _public_lessons_queryset():
+    return Lesson.objects.filter(website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED]).exclude(
+        status=Lesson.Status.ARCHIVED
+    )
+
+
+def _public_resources_queryset():
+    return LearningResource.objects.filter(status__in=[LearningResource.Status.READY, LearningResource.Status.PUBLISHED])
+
+
+RESOURCE_ATTRIBUTION_SESSION_KEY = "resource_conversion_attribution"
+RESOURCE_CONVERSION_KEYS_SESSION_KEY = "resource_conversion_keys"
+RESOURCE_CTA_ATTRIBUTION_SESSION_KEY = "resource_cta_attribution"
+RESOURCE_ATTRIBUTION_DAYS = 30
+
+
+def _track_resource_event(request, resource, event_type, subscriber=None, email=""):
+    """Record lightweight public resource analytics for Studio reporting and store last-touch attribution."""
+    user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+    event = ResourcePerformanceEvent.objects.create(
+        resource=resource,
+        event_type=event_type,
+        subscriber=subscriber,
+        user=user,
+        email=(email or (subscriber.email if subscriber else ""))[:254],
+        source_url=request.build_absolute_uri(request.path)[:300],
+        referrer=request.META.get("HTTP_REFERER", "")[:300],
+        user_agent=request.META.get("HTTP_USER_AGENT", "")[:300],
+    )
+    request.session[RESOURCE_ATTRIBUTION_SESSION_KEY] = {
+        "resource_id": resource.pk,
+        "event_id": event.pk,
+        "event_type": event.event_type,
+        "occurred_at": event.occurred_at.isoformat(),
+    }
+    return event
+
+
+def _get_resource_attribution(request):
+    data = request.session.get(RESOURCE_ATTRIBUTION_SESSION_KEY) or {}
+    resource_id = data.get("resource_id")
+    if not resource_id:
+        return None, None, data
+    source_event = None
+    event_id = data.get("event_id")
+    if event_id:
+        source_event = ResourcePerformanceEvent.objects.filter(pk=event_id, resource_id=resource_id).select_related("resource", "subscriber").first()
+    resource = source_event.resource if source_event else LearningResource.objects.filter(pk=resource_id).first()
+    if not resource:
+        return None, None, data
+    occurred_at = source_event.occurred_at if source_event else None
+    if not occurred_at and data.get("occurred_at"):
+        try:
+            occurred_at = datetime.fromisoformat(data["occurred_at"])
+        except (TypeError, ValueError):
+            occurred_at = None
+    if occurred_at and timezone.is_naive(occurred_at):
+        occurred_at = timezone.make_aware(occurred_at)
+    if occurred_at and occurred_at < timezone.now() - timedelta(days=RESOURCE_ATTRIBUTION_DAYS):
+        return None, None, data
+    return resource, source_event, data
+
+
+def _track_resource_conversion(request, event_type, lesson=None, subscriber=None, email="", metadata=None, dedupe=True):
+    resource, source_event, attribution = _get_resource_attribution(request)
+    if not resource:
+        return None
+    cta = None
+    cta_click = None
+    cta_data = request.session.get(RESOURCE_CTA_ATTRIBUTION_SESSION_KEY) or {}
+    if str(cta_data.get("resource_id")) == str(resource.pk):
+        cta_id = cta_data.get("cta_id")
+        click_id = cta_data.get("click_id")
+        if click_id:
+            cta_click = ResourceCTAClickEvent.objects.filter(pk=click_id, resource=resource).select_related("cta").first()
+            cta = cta_click.cta if cta_click else None
+        if not cta and cta_id:
+            cta = ResourceCTA.objects.filter(pk=cta_id, resource=resource).first()
+    user = request.user if getattr(request, "user", None) and request.user.is_authenticated else None
+    key = f"{resource.pk}:{lesson.pk if lesson else 'none'}:{event_type}:{user.pk if user else email or 'anon'}:{cta.pk if cta else 'nocta'}"
+    seen = request.session.get(RESOURCE_CONVERSION_KEYS_SESSION_KEY, [])
+    if dedupe and key in seen:
+        return None
+    conversion = ResourceLessonConversionEvent.objects.create(
+        resource=resource,
+        lesson=lesson,
+        event_type=event_type,
+        source_event=source_event,
+        subscriber=subscriber or (source_event.subscriber if source_event else None),
+        user=user,
+        cta=cta,
+        cta_click=cta_click,
+        email=(email or (subscriber.email if subscriber else "") or (source_event.email if source_event else ""))[:254],
+        attribution_event_type=(source_event.event_type if source_event else attribution.get("event_type", ""))[:20],
+        attribution_source_url=(source_event.source_url if source_event else "")[:300],
+        referrer=request.META.get("HTTP_REFERER", "")[:300],
+        metadata=metadata or {},
+    )
+    if dedupe:
+        seen = (seen + [key])[-100:]
+        request.session[RESOURCE_CONVERSION_KEYS_SESSION_KEY] = seen
+    return conversion
+
+
+def _resource_pdf_unlock_session_key(resource):
+    return f"resource_pdf_unlocked_{resource.pk}"
+
+
+def _resource_pdf_access_session_key(resource):
+    return f"resource_pdf_access_{resource.pk}"
+
+
+def _resource_cta_target_url(cta, request=None):
+    if cta.target_type in {ResourceCTA.TargetType.LESSON, ResourceCTA.TargetType.QUIZ, ResourceCTA.TargetType.CHALLENGE} and cta.target_lesson_id:
+        url = reverse("learn:lesson-detail", kwargs={"slug": cta.target_lesson.slug})
+        if cta.target_type in {ResourceCTA.TargetType.QUIZ, ResourceCTA.TargetType.CHALLENGE}:
+            url += "#practice"
+        return url
+    if cta.target_type == ResourceCTA.TargetType.PDF:
+        if cta.resource.pdf_requires_email:
+            return reverse("learn:resource-pdf-gate", kwargs={"slug": cta.resource.slug})
+        return reverse("learn:resource-pdf", kwargs={"slug": cta.resource.slug})
+    if cta.target_type == ResourceCTA.TargetType.NEWSLETTER:
+        return cta.resource.public_url + "#newsletter"
+    return cta.target_url or cta.resource.public_url
+
+
+def _touch_lesson_progress(user, lesson):
+    progress, _ = LessonProgress.objects.get_or_create(user=user, lesson=lesson)
+    progress.status = progress.Status.IN_PROGRESS if progress.status != progress.Status.COMPLETED else progress.status
+    progress.last_activity_at = timezone.now()
+    progress.save(update_fields=["status", "last_activity_at", "updated_at"])
+    return progress
+
+
+def _refresh_lesson_progress(user, lesson):
+    progress, _ = LessonProgress.objects.get_or_create(user=user, lesson=lesson)
+    progress.quiz_total = QuizAttempt.objects.filter(user=user, question__lesson=lesson).values("question_id").distinct().count()
+    progress.quiz_correct = QuizAttempt.objects.filter(user=user, question__lesson=lesson, is_correct=True).values("question_id").distinct().count()
+    progress.challenges_passed = ChallengeAttempt.objects.filter(user=user, challenge__lesson=lesson, passed=True).values("challenge_id").distinct().count()
+    progress.last_activity_at = timezone.now()
+    progress.save(update_fields=["quiz_total", "quiz_correct", "challenges_passed", "last_activity_at", "updated_at"])
+    _award_earned_badges(user)
+    return progress
+
+
+def _award_earned_badges(user):
+    if not user.is_authenticated:
+        return []
+    stats = {
+        LearnerBadge.CriteriaType.LESSONS_COMPLETED: LessonProgress.objects.filter(user=user, status=LessonProgress.Status.COMPLETED).count(),
+        LearnerBadge.CriteriaType.QUIZZES_CORRECT: QuizAttempt.objects.filter(user=user, is_correct=True).count(),
+        LearnerBadge.CriteriaType.CHALLENGES_PASSED: ChallengeAttempt.objects.filter(user=user, passed=True).count(),
+    }
+    awards = []
+    for badge in LearnerBadge.objects.filter(is_active=True):
+        if stats.get(badge.criteria_type, 0) >= badge.threshold:
+            award, created = LearnerBadgeAward.objects.get_or_create(user=user, badge=badge)
+            if created:
+                awards.append(award)
+    return awards
+
+
+class DashboardView(StaffRequiredMixin, TemplateView):
     template_name = "studio/dashboard.html"
 
     def get_context_data(self, **kwargs):
@@ -56,6 +308,45 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             or 0
         )
         context["recent_generations"] = AIGeneration.objects.select_related("lesson")[:6]
+        context["recent_publishing_records"] = PublishingRecord.objects.select_related("lesson")[:6]
+        context["upcoming_content_plans"] = ContentPlan.objects.select_related("lesson", "caption", "graphic").filter(scheduled_at__gte=timezone.now()).order_by("scheduled_at")[:6]
+        context["publishing_totals"] = PublishingRecord.objects.aggregate(
+            impressions=Sum("impressions"),
+            reach=Sum("reach"),
+            likes=Sum("likes"),
+            comments=Sum("comments"),
+            saves=Sum("saves"),
+            shares=Sum("shares"),
+            clicks=Sum("clicks"),
+            new_followers=Sum("new_followers"),
+        )
+        context["subscriber_totals"] = {
+            "active": NewsletterSubscriber.objects.filter(status=NewsletterSubscriber.Status.ACTIVE).count(),
+            "total": NewsletterSubscriber.objects.count(),
+            "recent": NewsletterSubscriber.objects.filter(subscribed_at__gte=timezone.now() - timedelta(days=30)).count(),
+            "segments": SubscriberSegment.objects.filter(is_active=True).count(),
+        }
+        context["recent_subscribers"] = NewsletterSubscriber.objects.select_related("source_lesson")[:6]
+        context["subscriber_segments"] = SubscriberSegment.objects.filter(is_active=True)[:6]
+        context["upcoming_newsletter_campaigns"] = NewsletterCampaign.objects.select_related("lesson").filter(status__in=[NewsletterCampaign.Status.READY, NewsletterCampaign.Status.SCHEDULED], scheduled_at__gte=timezone.now()).order_by("scheduled_at")[:6]
+        context["newsletter_campaign_totals"] = {
+            "draft": NewsletterCampaign.objects.filter(status=NewsletterCampaign.Status.DRAFT).count(),
+            "scheduled": NewsletterCampaign.objects.filter(status=NewsletterCampaign.Status.SCHEDULED).count(),
+            "sent": NewsletterCampaign.objects.filter(status=NewsletterCampaign.Status.SENT).count(),
+        }
+        context["provider_readiness_summary"] = provider_readiness_summary()
+        last_30_days = timezone.now() - timedelta(days=30)
+        context["resource_performance_totals"] = {
+            "views": ResourcePerformanceEvent.objects.filter(event_type=ResourcePerformanceEvent.EventType.VIEW, occurred_at__gte=last_30_days).count(),
+            "unlocks": ResourcePerformanceEvent.objects.filter(event_type=ResourcePerformanceEvent.EventType.PDF_UNLOCK, occurred_at__gte=last_30_days).count(),
+            "downloads": ResourcePerformanceEvent.objects.filter(event_type=ResourcePerformanceEvent.EventType.PDF_DOWNLOAD, occurred_at__gte=last_30_days).count(),
+        }
+        context["resource_conversion_totals"] = {
+            "lesson_views": ResourceLessonConversionEvent.objects.filter(event_type=ResourceLessonConversionEvent.EventType.LESSON_VIEW, occurred_at__gte=last_30_days).count(),
+            "signups": ResourceLessonConversionEvent.objects.filter(event_type=ResourceLessonConversionEvent.EventType.ACCOUNT_SIGNUP, occurred_at__gte=last_30_days).count(),
+            "completions": ResourceLessonConversionEvent.objects.filter(event_type=ResourceLessonConversionEvent.EventType.LESSON_COMPLETE, occurred_at__gte=last_30_days).count(),
+        }
+        context["recommendation_tuning"] = RecommendationTuning.get_active()
         first_lesson = Lesson.objects.order_by("created_at").first()
         lesson_url = first_lesson.get_absolute_url() if first_lesson else reverse(
             "studio:lesson-create"
@@ -92,6 +383,42 @@ class DashboardView(LoginRequiredMixin, TemplateView):
                 "url": lesson_url,
             },
             {
+                "label": "Plan the week",
+                "description": "Schedule lessons, captions, and graphics by platform before you post.",
+                "complete": ContentPlan.objects.exists(),
+                "url": reverse("studio:content-planner"),
+            },
+            {
+                "label": "Record a published post",
+                "description": "Save the URL, caption, graphic, and engagement metrics after posting.",
+                "complete": PublishingRecord.objects.exists(),
+                "url": reverse("studio:content-calendar"),
+            },
+            {
+                "label": "Review performance",
+                "description": "Compare formats, platforms, and top posts so you know what to repeat.",
+                "complete": PublishingRecord.objects.count() >= 2,
+                "url": reverse("studio:performance-report"),
+            },
+            {
+                "label": "Capture learner emails",
+                "description": "Use the public newsletter form to collect beginners who want lessons and practice prompts.",
+                "complete": NewsletterSubscriber.objects.filter(status=NewsletterSubscriber.Status.ACTIVE).exists(),
+                "url": reverse("studio:newsletter-subscriber-list"),
+            },
+            {
+                "label": "Create saved audience segments",
+                "description": "Group subscribers by source, skill level, recency, or lesson signup so campaigns can target repeatable audiences.",
+                "complete": SubscriberSegment.objects.filter(is_active=True).exists(),
+                "url": reverse("studio:subscriber-segment-list"),
+            },
+            {
+                "label": "Plan a newsletter campaign",
+                "description": "Draft or schedule a weekly email from a lesson and track its send status.",
+                "complete": NewsletterCampaign.objects.exists(),
+                "url": reverse("studio:newsletter-campaign-list"),
+            },
+            {
                 "label": "Preview the website lesson",
                 "description": "Resolve SEO warnings and inspect the standalone page.",
                 "complete": WebsiteExport.objects.exists(),
@@ -106,11 +433,2297 @@ class DashboardView(LoginRequiredMixin, TemplateView):
         return context
 
 
-class HelpView(LoginRequiredMixin, TemplateView):
+class RecommendationTuningUpdateView(StaffRequiredMixin, UpdateView):
+    model = RecommendationTuning
+    form_class = RecommendationTuningForm
+    template_name = "studio/recommendation_tuning_form.html"
+
+    def get_object(self, queryset=None):
+        return RecommendationTuning.get_active()
+
+    def form_valid(self, form):
+        messages.success(self.request, "Recommendation tuning controls saved.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("studio:recommendation-tuning")
+
+
+class ContentCalendarView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/content_calendar.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        lessons = Lesson.objects.select_related("category", "series").prefetch_related("assets", "captions")
+        status_order = [choice[0] for choice in Lesson.Status.choices]
+        status_labels = dict(Lesson.Status.choices)
+        columns = []
+        for status in status_order:
+            items = [lesson for lesson in lessons if lesson.status == status]
+            columns.append({"status": status, "label": status_labels[status], "lessons": items})
+        platform_backlog = []
+        for lesson in lessons:
+            missing = []
+            if lesson.facebook_status not in {Lesson.Status.READY, Lesson.Status.PUBLISHED}:
+                missing.append("Facebook")
+            if lesson.instagram_status not in {Lesson.Status.READY, Lesson.Status.PUBLISHED}:
+                missing.append("Instagram")
+            if lesson.threads_status not in {Lesson.Status.READY, Lesson.Status.PUBLISHED}:
+                missing.append("Threads")
+            if lesson.website_status not in {Lesson.Status.READY, Lesson.Status.PUBLISHED}:
+                missing.append("Website")
+            if missing:
+                platform_backlog.append({"lesson": lesson, "missing": missing})
+        context["columns"] = columns
+        context["platform_backlog"] = platform_backlog[:20]
+        context["recent_publishing_records"] = PublishingRecord.objects.select_related("lesson").order_by("-published_at")[:20]
+        context["upcoming_content_plans"] = ContentPlan.objects.select_related("lesson", "caption", "graphic").filter(scheduled_at__gte=timezone.now()).order_by("scheduled_at")[:20]
+        context["platform_metrics"] = (
+            PublishingRecord.objects.values("platform")
+            .annotate(
+                posts=Count("id"),
+                impressions=Sum("impressions"),
+                reach=Sum("reach"),
+                likes=Sum("likes"),
+                comments=Sum("comments"),
+                saves=Sum("saves"),
+                shares=Sum("shares"),
+                clicks=Sum("clicks"),
+                new_followers=Sum("new_followers"),
+            )
+            .order_by("platform")
+        )
+        return context
+
+
+def _planner_week_bounds(request):
+    raw_week = request.GET.get("week", "").strip()
+    today = timezone.localdate()
+    try:
+        selected = datetime.strptime(raw_week, "%Y-%m-%d").date() if raw_week else today
+    except ValueError:
+        selected = today
+    week_start = selected - timedelta(days=selected.weekday())
+    week_end = week_start + timedelta(days=6)
+    start_dt = timezone.make_aware(datetime.combine(week_start, time.min))
+    end_dt = timezone.make_aware(datetime.combine(week_end + timedelta(days=1), time.min))
+    return week_start, week_end, start_dt, end_dt
+
+
+class ContentPlannerView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/content_planner.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        week_start, week_end, start_dt, end_dt = _planner_week_bounds(self.request)
+        plans = (
+            ContentPlan.objects.filter(scheduled_at__gte=start_dt, scheduled_at__lt=end_dt)
+            .select_related("lesson", "lesson__category", "lesson__series", "caption", "graphic", "publishing_record")
+            .order_by("scheduled_at", "platform")
+        )
+        days = []
+        for offset in range(7):
+            day = week_start + timedelta(days=offset)
+            day_plans = [plan for plan in plans if timezone.localtime(plan.scheduled_at).date() == day]
+            days.append({"date": day, "plans": day_plans})
+
+        unscheduled_ready_lessons = (
+            Lesson.objects.filter(status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED])
+            .exclude(content_plans__scheduled_at__gte=start_dt, content_plans__scheduled_at__lt=end_dt)
+            .select_related("category", "series")[:12]
+        )
+        platform_counts = plans.values("platform").annotate(total=Count("id")).order_by("platform")
+        status_counts = plans.values("status").annotate(total=Count("id")).order_by("status")
+        newsletter_campaigns = (
+            NewsletterCampaign.objects.filter(scheduled_at__gte=start_dt, scheduled_at__lt=end_dt)
+            .select_related("lesson", "content_plan", "publishing_record")
+            .order_by("scheduled_at", "title")
+        )
+
+        context.update({
+            "week_start": week_start,
+            "week_end": week_end,
+            "previous_week": week_start - timedelta(days=7),
+            "next_week": week_start + timedelta(days=7),
+            "days": days,
+            "plans": plans,
+            "platform_counts": platform_counts,
+            "status_counts": status_counts,
+            "unscheduled_ready_lessons": unscheduled_ready_lessons,
+            "newsletter_campaigns": newsletter_campaigns,
+        })
+        return context
+
+
+REPORT_WINDOW_DAYS = 90
+
+
+def _report_date_from_query(raw_value):
+    if not raw_value:
+        return None
+    try:
+        return datetime.strptime(raw_value, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _content_plan_for_record(record):
+    try:
+        return record.content_plan
+    except ContentPlan.DoesNotExist:
+        return None
+
+
+def _record_content_format(record):
+    plan = _content_plan_for_record(record)
+    if plan and plan.carousel_template:
+        template = get_social_carousel_template(plan.carousel_template)
+        return {
+            "key": plan.carousel_template,
+            "label": template.name if template else plan.carousel_template.replace("_", " ").title(),
+            "source": "Planned carousel",
+        }
+    if record.graphic_id and record.graphic and record.graphic.template_id:
+        return {
+            "key": record.graphic.template.slug,
+            "label": record.graphic.template.name,
+            "source": "Graphic template",
+        }
+    if record.caption_id:
+        return {"key": "caption_only", "label": "Caption only", "source": "Caption"}
+    return {"key": "unspecified", "label": "Unspecified", "source": "Manual entry"}
+
+
+def _new_report_bucket(label):
+    return {
+        "label": label,
+        "posts": 0,
+        "impressions": 0,
+        "reach": 0,
+        "likes": 0,
+        "comments": 0,
+        "saves": 0,
+        "shares": 0,
+        "clicks": 0,
+        "new_followers": 0,
+        "engagements": 0,
+        "engagement_rate": None,
+        "followers_per_post": 0,
+        "clicks_per_post": 0,
+    }
+
+
+def _add_record_to_bucket(bucket, record):
+    bucket["posts"] += 1
+    bucket["impressions"] += record.impressions or 0
+    bucket["reach"] += record.reach or 0
+    bucket["likes"] += record.likes or 0
+    bucket["comments"] += record.comments or 0
+    bucket["saves"] += record.saves or 0
+    bucket["shares"] += record.shares or 0
+    bucket["clicks"] += record.clicks or 0
+    bucket["new_followers"] += record.new_followers or 0
+    bucket["engagements"] += record.engagement_total
+
+
+def _finalize_report_bucket(bucket):
+    denominator = bucket["reach"] or bucket["impressions"]
+    if denominator:
+        bucket["engagement_rate"] = round(bucket["engagements"] / denominator * 100, 2)
+    if bucket["posts"]:
+        bucket["followers_per_post"] = round(bucket["new_followers"] / bucket["posts"], 2)
+        bucket["clicks_per_post"] = round(bucket["clicks"] / bucket["posts"], 2)
+    return bucket
+
+
+def _performance_report_window(request):
+    today = timezone.localdate()
+    default_start = today - timedelta(days=REPORT_WINDOW_DAYS)
+    start_date = _report_date_from_query(request.GET.get("start")) or default_start
+    end_date = _report_date_from_query(request.GET.get("end")) or today
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+    return start_date, end_date
+
+
+def _performance_report_records(request):
+    start_date, end_date = _performance_report_window(request)
+    start_dt = timezone.make_aware(datetime.combine(start_date, time.min))
+    end_dt = timezone.make_aware(datetime.combine(end_date + timedelta(days=1), time.min))
+    platform_filter = request.GET.get("platform", "").strip()
+    valid_platforms = {choice[0] for choice in PublishingRecord.Platform.choices}
+
+    records = (
+        PublishingRecord.objects.filter(published_at__gte=start_dt, published_at__lt=end_dt)
+        .select_related("lesson", "caption", "graphic", "graphic__template")
+        .order_by("-published_at")
+    )
+    if platform_filter in valid_platforms:
+        records = records.filter(platform=platform_filter)
+    return list(records), start_date, end_date, platform_filter if platform_filter in valid_platforms else ""
+
+
+def _performance_report_tables(records):
+    format_buckets = {}
+    platform_buckets = {}
+    matrix = {}
+    for record in records:
+        format_info = _record_content_format(record)
+        format_key = format_info["key"]
+        format_bucket = format_buckets.setdefault(format_key, _new_report_bucket(format_info["label"]))
+        format_bucket["key"] = format_key
+        format_bucket["source"] = format_info["source"]
+        _add_record_to_bucket(format_bucket, record)
+
+        platform_label = record.get_platform_display()
+        platform_bucket = platform_buckets.setdefault(record.platform, _new_report_bucket(platform_label))
+        platform_bucket["key"] = record.platform
+        _add_record_to_bucket(platform_bucket, record)
+
+        matrix_key = (format_key, record.platform)
+        matrix_bucket = matrix.setdefault(matrix_key, _new_report_bucket(f"{format_info['label']} · {platform_label}"))
+        matrix_bucket["format_label"] = format_info["label"]
+        matrix_bucket["platform_label"] = platform_label
+        _add_record_to_bucket(matrix_bucket, record)
+
+    format_rows = sorted((_finalize_report_bucket(row) for row in format_buckets.values()), key=lambda row: (row["new_followers"], row["engagements"], row["posts"]), reverse=True)
+    platform_rows = sorted((_finalize_report_bucket(row) for row in platform_buckets.values()), key=lambda row: row["posts"], reverse=True)
+    matrix_rows = sorted((_finalize_report_bucket(row) for row in matrix.values()), key=lambda row: (row["format_label"], row["platform_label"]))
+
+    totals = _new_report_bucket("Total")
+    for record in records:
+        _add_record_to_bucket(totals, record)
+    _finalize_report_bucket(totals)
+
+    top_records = sorted(records, key=lambda record: (record.new_followers, record.engagement_total, record.reach or record.impressions), reverse=True)[:10]
+    return {
+        "totals": totals,
+        "format_rows": format_rows,
+        "platform_rows": platform_rows,
+        "matrix_rows": matrix_rows,
+        "top_records": top_records,
+    }
+
+
+def _csv_response(filename):
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.write("\ufeff")
+    return response
+
+
+class PerformanceReportView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/performance_report.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        records, start_date, end_date, platform_filter = _performance_report_records(self.request)
+        tables = _performance_report_tables(records)
+        export_query = self.request.GET.urlencode()
+
+        context.update({
+            "start_date": start_date,
+            "end_date": end_date,
+            "platform_filter": platform_filter,
+            "platform_choices": PublishingRecord.Platform.choices,
+            "records": records,
+            "export_query": export_query,
+            "report_window_days": REPORT_WINDOW_DAYS,
+            **tables,
+        })
+        return context
+
+
+class PerformanceReportExportView(StaffRequiredMixin, TemplateView):
+    def get(self, request, *args, **kwargs):
+        records, start_date, end_date, platform_filter = _performance_report_records(request)
+        tables = _performance_report_tables(records)
+        section = request.GET.get("section", "posts")
+        platform_label = platform_filter or "all-platforms"
+        filename = f"code-with-michael-performance-{section}-{start_date}-to-{end_date}-{platform_label}.csv"
+        response = _csv_response(filename)
+        writer = csv.writer(response)
+
+        if section == "formats":
+            writer.writerow(["Format", "Source", "Posts", "Impressions", "Reach", "Engagements", "Engagement Rate", "Clicks", "New Followers", "Clicks Per Post", "Followers Per Post"])
+            for row in tables["format_rows"]:
+                writer.writerow([row["label"], row.get("source", ""), row["posts"], row["impressions"], row["reach"], row["engagements"], row["engagement_rate"] if row["engagement_rate"] is not None else "", row["clicks"], row["new_followers"], row["clicks_per_post"], row["followers_per_post"]])
+        elif section == "platforms":
+            writer.writerow(["Platform", "Posts", "Impressions", "Reach", "Engagements", "Engagement Rate", "Clicks", "New Followers", "Clicks Per Post", "Followers Per Post"])
+            for row in tables["platform_rows"]:
+                writer.writerow([row["label"], row["posts"], row["impressions"], row["reach"], row["engagements"], row["engagement_rate"] if row["engagement_rate"] is not None else "", row["clicks"], row["new_followers"], row["clicks_per_post"], row["followers_per_post"]])
+        elif section == "matrix":
+            writer.writerow(["Format", "Platform", "Posts", "Impressions", "Reach", "Engagements", "Engagement Rate", "Clicks", "New Followers", "Clicks Per Post", "Followers Per Post"])
+            for row in tables["matrix_rows"]:
+                writer.writerow([row["format_label"], row["platform_label"], row["posts"], row["impressions"], row["reach"], row["engagements"], row["engagement_rate"] if row["engagement_rate"] is not None else "", row["clicks"], row["new_followers"], row["clicks_per_post"], row["followers_per_post"]])
+        else:
+            writer.writerow(["Published At", "Lesson", "Platform", "Content Format", "Format Source", "Post URL", "Impressions", "Reach", "Likes", "Comments", "Saves", "Shares", "Clicks", "Engagements", "Engagement Rate", "New Followers", "Follower Count After", "Caption", "Notes"])
+            for record in records:
+                format_info = _record_content_format(record)
+                writer.writerow([
+                    timezone.localtime(record.published_at).strftime("%Y-%m-%d %H:%M"),
+                    record.lesson.title,
+                    record.get_platform_display(),
+                    format_info["label"],
+                    format_info["source"],
+                    record.post_url,
+                    record.impressions,
+                    record.reach,
+                    record.likes,
+                    record.comments,
+                    record.saves,
+                    record.shares,
+                    record.clicks,
+                    record.engagement_total,
+                    record.engagement_rate if record.engagement_rate is not None else "",
+                    record.new_followers,
+                    record.follower_count_after,
+                    record.caption_text,
+                    record.notes,
+                ])
+        return response
+
+
+def _resource_report_events(request):
+    today = timezone.localdate()
+    raw_start = request.GET.get("start") or (today - timedelta(days=30)).isoformat()
+    raw_end = request.GET.get("end") or today.isoformat()
+    event_type = request.GET.get("event_type", "").strip()
+    resource_type = request.GET.get("resource_type", "").strip()
+
+    try:
+        start_date = datetime.strptime(raw_start, "%Y-%m-%d").date()
+    except ValueError:
+        start_date = today - timedelta(days=30)
+    try:
+        end_date = datetime.strptime(raw_end, "%Y-%m-%d").date()
+    except ValueError:
+        end_date = today
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    start_dt = timezone.make_aware(datetime.combine(start_date, time.min))
+    end_dt = timezone.make_aware(datetime.combine(end_date + timedelta(days=1), time.min))
+    events = ResourcePerformanceEvent.objects.select_related("resource", "subscriber", "user").filter(
+        occurred_at__gte=start_dt,
+        occurred_at__lt=end_dt,
+    )
+    if event_type:
+        events = events.filter(event_type=event_type)
+    if resource_type:
+        events = events.filter(resource__resource_type=resource_type)
+    return events, start_date, end_date, event_type, resource_type
+
+
+def _resource_report_rows(events, start_date, end_date, resource_type=""):
+    resources = LearningResource.objects.select_related("category").filter(
+        performance_events__in=events
+    ).distinct()
+    if resource_type:
+        resources = resources.filter(resource_type=resource_type)
+
+    rows = []
+    for resource in resources.order_by("resource_type", "title"):
+        resource_events = events.filter(resource=resource)
+        views = resource_events.filter(event_type=ResourcePerformanceEvent.EventType.VIEW).count()
+        unlocks = resource_events.filter(event_type=ResourcePerformanceEvent.EventType.PDF_UNLOCK).count()
+        downloads = resource_events.filter(event_type=ResourcePerformanceEvent.EventType.PDF_DOWNLOAD).count()
+        active_subscribers = NewsletterSubscriber.objects.filter(
+            source_resource=resource,
+            status=NewsletterSubscriber.Status.ACTIVE,
+            subscribed_at__date__gte=start_date,
+            subscribed_at__date__lte=end_date,
+        ).count()
+        rows.append({
+            "resource": resource,
+            "views": views,
+            "unlocks": unlocks,
+            "downloads": downloads,
+            "subscribers": active_subscribers,
+            "unlock_rate": round(unlocks / views * 100, 2) if views else None,
+            "download_rate": round(downloads / views * 100, 2) if views else None,
+            "subscriber_rate": round(active_subscribers / views * 100, 2) if views else None,
+        })
+    rows.sort(key=lambda row: (row["subscribers"], row["downloads"], row["unlocks"], row["views"]), reverse=True)
+    return rows
+
+
+def _resource_type_summary(resource_rows):
+    labels = dict(LearningResource.ResourceType.choices)
+    summary = {}
+    for row in resource_rows:
+        key = row["resource"].resource_type
+        bucket = summary.setdefault(key, {
+            "key": key,
+            "label": labels.get(key, key),
+            "resources": 0,
+            "views": 0,
+            "unlocks": 0,
+            "downloads": 0,
+            "subscribers": 0,
+        })
+        bucket["resources"] += 1
+        bucket["views"] += row["views"]
+        bucket["unlocks"] += row["unlocks"]
+        bucket["downloads"] += row["downloads"]
+        bucket["subscribers"] += row["subscribers"]
+    rows = []
+    for bucket in summary.values():
+        views = bucket["views"]
+        bucket["unlock_rate"] = round(bucket["unlocks"] / views * 100, 2) if views else None
+        bucket["download_rate"] = round(bucket["downloads"] / views * 100, 2) if views else None
+        bucket["subscriber_rate"] = round(bucket["subscribers"] / views * 100, 2) if views else None
+        rows.append(bucket)
+    return sorted(rows, key=lambda row: (row["subscribers"], row["downloads"], row["views"]), reverse=True)
+
+
+class ResourcePerformanceReportView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/resource_performance_report.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        events, start_date, end_date, event_type, resource_type = _resource_report_events(self.request)
+        rows = _resource_report_rows(events, start_date, end_date, resource_type=resource_type)
+        totals = {
+            "views": sum(row["views"] for row in rows),
+            "unlocks": sum(row["unlocks"] for row in rows),
+            "downloads": sum(row["downloads"] for row in rows),
+            "subscribers": sum(row["subscribers"] for row in rows),
+        }
+        totals["unlock_rate"] = round(totals["unlocks"] / totals["views"] * 100, 2) if totals["views"] else None
+        totals["download_rate"] = round(totals["downloads"] / totals["views"] * 100, 2) if totals["views"] else None
+        totals["subscriber_rate"] = round(totals["subscribers"] / totals["views"] * 100, 2) if totals["views"] else None
+        context.update({
+            "start_date": start_date,
+            "end_date": end_date,
+            "event_type": event_type,
+            "resource_type": resource_type,
+            "event_type_choices": ResourcePerformanceEvent.EventType.choices,
+            "resource_type_choices": LearningResource.ResourceType.choices,
+            "resource_rows": rows,
+            "resource_type_rows": _resource_type_summary(rows),
+            "totals": totals,
+            "recent_events": events.order_by("-occurred_at")[:40],
+            "export_query": self.request.GET.urlencode(),
+        })
+        return context
+
+
+class ResourcePerformanceReportExportView(StaffRequiredMixin, TemplateView):
+    def get(self, request, *args, **kwargs):
+        events, start_date, end_date, event_type, resource_type = _resource_report_events(request)
+        rows = _resource_report_rows(events, start_date, end_date, resource_type=resource_type)
+        section = request.GET.get("section", "resources")
+        filename = f"code-with-michael-resource-performance-{section}-{start_date}-to-{end_date}.csv"
+        response = _csv_response(filename)
+        writer = csv.writer(response)
+        if section == "types":
+            writer.writerow(["Resource Type", "Resources", "Views", "PDF Unlocks", "PDF Downloads", "Subscribers", "Unlock Rate", "Download Rate", "Subscriber Conversion Rate"])
+            for row in _resource_type_summary(rows):
+                writer.writerow([row["label"], row["resources"], row["views"], row["unlocks"], row["downloads"], row["subscribers"], row["unlock_rate"] if row["unlock_rate"] is not None else "", row["download_rate"] if row["download_rate"] is not None else "", row["subscriber_rate"] if row["subscriber_rate"] is not None else ""])
+        elif section == "events":
+            writer.writerow(["Occurred At", "Event", "Resource", "Resource Type", "Email", "Subscriber", "Source URL", "Referrer"])
+            for event in events.order_by("-occurred_at"):
+                writer.writerow([timezone.localtime(event.occurred_at).strftime("%Y-%m-%d %H:%M"), event.get_event_type_display(), event.resource.title, event.resource.get_resource_type_display(), event.email, event.subscriber.email if event.subscriber else "", event.source_url, event.referrer])
+        else:
+            writer.writerow(["Resource", "Resource Type", "Status", "Views", "PDF Unlocks", "PDF Downloads", "Subscribers", "Unlock Rate", "Download Rate", "Subscriber Conversion Rate", "Public URL"])
+            for row in rows:
+                resource = row["resource"]
+                writer.writerow([resource.title, resource.get_resource_type_display(), resource.get_status_display(), row["views"], row["unlocks"], row["downloads"], row["subscribers"], row["unlock_rate"] if row["unlock_rate"] is not None else "", row["download_rate"] if row["download_rate"] is not None else "", row["subscriber_rate"] if row["subscriber_rate"] is not None else "", resource.public_url])
+        return response
+
+
+def _resource_conversion_report_events(request):
+    today = timezone.localdate()
+    raw_start = request.GET.get("start") or (today - timedelta(days=30)).isoformat()
+    raw_end = request.GET.get("end") or today.isoformat()
+    event_type = request.GET.get("event_type", "").strip()
+    resource_type = request.GET.get("resource_type", "").strip()
+    try:
+        start_date = datetime.strptime(raw_start, "%Y-%m-%d").date()
+    except ValueError:
+        start_date = today - timedelta(days=30)
+    try:
+        end_date = datetime.strptime(raw_end, "%Y-%m-%d").date()
+    except ValueError:
+        end_date = today
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+    start_dt = timezone.make_aware(datetime.combine(start_date, time.min))
+    end_dt = timezone.make_aware(datetime.combine(end_date + timedelta(days=1), time.min))
+    events = ResourceLessonConversionEvent.objects.select_related("resource", "lesson", "subscriber", "user", "source_event").filter(
+        occurred_at__gte=start_dt,
+        occurred_at__lt=end_dt,
+    )
+    if event_type:
+        events = events.filter(event_type=event_type)
+    if resource_type:
+        events = events.filter(resource__resource_type=resource_type)
+    return events, start_date, end_date, event_type, resource_type
+
+
+def _resource_conversion_rows(events, start_date, end_date, resource_type=""):
+    resources = LearningResource.objects.select_related("category").filter(
+        lesson_conversion_events__in=events
+    ).distinct()
+    if resource_type:
+        resources = resources.filter(resource_type=resource_type)
+    rows = []
+    for resource in resources.order_by("resource_type", "title"):
+        resource_events = events.filter(resource=resource)
+        views = ResourcePerformanceEvent.objects.filter(
+            resource=resource,
+            event_type=ResourcePerformanceEvent.EventType.VIEW,
+            occurred_at__date__gte=start_date,
+            occurred_at__date__lte=end_date,
+        ).count()
+        signups = resource_events.filter(event_type=ResourceLessonConversionEvent.EventType.ACCOUNT_SIGNUP).count()
+        lesson_views = resource_events.filter(event_type=ResourceLessonConversionEvent.EventType.LESSON_VIEW).count()
+        quiz_attempts = resource_events.filter(event_type=ResourceLessonConversionEvent.EventType.QUIZ_ATTEMPT).count()
+        challenge_attempts = resource_events.filter(event_type=ResourceLessonConversionEvent.EventType.CHALLENGE_ATTEMPT).count()
+        completions = resource_events.filter(event_type=ResourceLessonConversionEvent.EventType.LESSON_COMPLETE).count()
+        rows.append({
+            "resource": resource,
+            "resource_views": views,
+            "lesson_views": lesson_views,
+            "account_signups": signups,
+            "quiz_attempts": quiz_attempts,
+            "challenge_attempts": challenge_attempts,
+            "lesson_completions": completions,
+            "total_conversions": resource_events.count(),
+            "signup_rate": round(signups / views * 100, 2) if views else None,
+            "lesson_view_rate": round(lesson_views / views * 100, 2) if views else None,
+            "completion_rate": round(completions / views * 100, 2) if views else None,
+        })
+    rows.sort(key=lambda row: (row["lesson_completions"], row["account_signups"], row["lesson_views"], row["total_conversions"]), reverse=True)
+    return rows
+
+
+def _resource_conversion_action_summary(events):
+    labels = dict(ResourceLessonConversionEvent.EventType.choices)
+    rows = []
+    for key, label in labels.items():
+        count = events.filter(event_type=key).count()
+        if count:
+            rows.append({"key": key, "label": label, "count": count})
+    return sorted(rows, key=lambda row: row["count"], reverse=True)
+
+
+class ResourceConversionReportView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/resource_conversion_report.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        events, start_date, end_date, event_type, resource_type = _resource_conversion_report_events(self.request)
+        rows = _resource_conversion_rows(events, start_date, end_date, resource_type=resource_type)
+        totals = {
+            "resource_views": sum(row["resource_views"] for row in rows),
+            "lesson_views": sum(row["lesson_views"] for row in rows),
+            "account_signups": sum(row["account_signups"] for row in rows),
+            "quiz_attempts": sum(row["quiz_attempts"] for row in rows),
+            "challenge_attempts": sum(row["challenge_attempts"] for row in rows),
+            "lesson_completions": sum(row["lesson_completions"] for row in rows),
+            "total_conversions": sum(row["total_conversions"] for row in rows),
+        }
+        totals["signup_rate"] = round(totals["account_signups"] / totals["resource_views"] * 100, 2) if totals["resource_views"] else None
+        totals["lesson_view_rate"] = round(totals["lesson_views"] / totals["resource_views"] * 100, 2) if totals["resource_views"] else None
+        totals["completion_rate"] = round(totals["lesson_completions"] / totals["resource_views"] * 100, 2) if totals["resource_views"] else None
+        top_lessons = (
+            events.exclude(lesson__isnull=True)
+            .values("lesson__title", "lesson__slug")
+            .annotate(total=Count("id"))
+            .order_by("-total")[:10]
+        )
+        context.update({
+            "start_date": start_date,
+            "end_date": end_date,
+            "event_type": event_type,
+            "resource_type": resource_type,
+            "event_type_choices": ResourceLessonConversionEvent.EventType.choices,
+            "resource_type_choices": LearningResource.ResourceType.choices,
+            "resource_rows": rows,
+            "action_rows": _resource_conversion_action_summary(events),
+            "top_lessons": top_lessons,
+            "totals": totals,
+            "recent_events": events.order_by("-occurred_at")[:50],
+            "export_query": self.request.GET.urlencode(),
+        })
+        return context
+
+
+class ResourceConversionReportExportView(StaffRequiredMixin, TemplateView):
+    def get(self, request, *args, **kwargs):
+        events, start_date, end_date, event_type, resource_type = _resource_conversion_report_events(request)
+        rows = _resource_conversion_rows(events, start_date, end_date, resource_type=resource_type)
+        section = request.GET.get("section", "resources")
+        filename = f"code-with-michael-resource-conversions-{section}-{start_date}-to-{end_date}.csv"
+        response = _csv_response(filename)
+        writer = csv.writer(response)
+        if section == "events":
+            writer.writerow(["Occurred At", "Conversion", "Resource", "Resource Type", "Lesson", "User", "Email", "Attribution Event", "Attribution URL", "Referrer"])
+            for event in events.order_by("-occurred_at"):
+                writer.writerow([
+                    timezone.localtime(event.occurred_at).strftime("%Y-%m-%d %H:%M"),
+                    event.get_event_type_display(),
+                    event.resource.title,
+                    event.resource.get_resource_type_display(),
+                    event.lesson.title if event.lesson else "",
+                    event.user.email if event.user else "",
+                    event.email,
+                    event.get_attribution_event_type_display() if event.attribution_event_type else "",
+                    event.attribution_source_url,
+                    event.referrer,
+                ])
+        elif section == "actions":
+            writer.writerow(["Conversion Type", "Count"])
+            for row in _resource_conversion_action_summary(events):
+                writer.writerow([row["label"], row["count"]])
+        else:
+            writer.writerow(["Resource", "Resource Type", "Resource Views", "Lesson Views", "Account Signups", "Quiz Attempts", "Challenge Attempts", "Lesson Completions", "Total Conversions", "Lesson View Rate", "Signup Rate", "Completion Rate", "Public URL"])
+            for row in rows:
+                resource = row["resource"]
+                writer.writerow([resource.title, resource.get_resource_type_display(), row["resource_views"], row["lesson_views"], row["account_signups"], row["quiz_attempts"], row["challenge_attempts"], row["lesson_completions"], row["total_conversions"], row["lesson_view_rate"] if row["lesson_view_rate"] is not None else "", row["signup_rate"] if row["signup_rate"] is not None else "", row["completion_rate"] if row["completion_rate"] is not None else "", resource.public_url])
+        return response
+
+
+class PublicResourceCTAClickView(DetailView):
+    model = ResourceCTA
+
+    def get_queryset(self):
+        return ResourceCTA.objects.filter(
+            is_active=True,
+            resource__slug=self.kwargs.get("resource_slug"),
+            resource__status__in=[LearningResource.Status.READY, LearningResource.Status.PUBLISHED],
+        ).select_related("resource", "target_lesson")
+
+    def get(self, request, *args, **kwargs):
+        cta = self.get_object()
+        target_url = _resource_cta_target_url(cta, request=request)
+        user = request.user if request.user.is_authenticated else None
+        click = ResourceCTAClickEvent.objects.create(
+            cta=cta,
+            resource=cta.resource,
+            target_lesson=cta.target_lesson,
+            user=user,
+            source_url=request.build_absolute_uri(request.path)[:300],
+            target_url=target_url[:300],
+            referrer=request.META.get("HTTP_REFERER", "")[:300],
+            user_agent=request.META.get("HTTP_USER_AGENT", "")[:300],
+        )
+        request.session[RESOURCE_ATTRIBUTION_SESSION_KEY] = {
+            "resource_id": cta.resource_id,
+            "event_type": "cta_click",
+            "occurred_at": click.occurred_at.isoformat(),
+        }
+        request.session[RESOURCE_CTA_ATTRIBUTION_SESSION_KEY] = {
+            "resource_id": cta.resource_id,
+            "cta_id": cta.pk,
+            "click_id": click.pk,
+            "target_lesson_id": cta.target_lesson_id,
+            "occurred_at": click.occurred_at.isoformat(),
+        }
+        return redirect(target_url)
+
+
+def _resource_cta_report_data(request):
+    today = timezone.localdate()
+    raw_start = request.GET.get("start") or (today - timedelta(days=30)).isoformat()
+    raw_end = request.GET.get("end") or today.isoformat()
+    target_type = request.GET.get("target_type", "").strip()
+    resource_type = request.GET.get("resource_type", "").strip()
+    try:
+        start_date = datetime.strptime(raw_start, "%Y-%m-%d").date()
+    except ValueError:
+        start_date = today - timedelta(days=30)
+    try:
+        end_date = datetime.strptime(raw_end, "%Y-%m-%d").date()
+    except ValueError:
+        end_date = today
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+    start_dt = timezone.make_aware(datetime.combine(start_date, time.min))
+    end_dt = timezone.make_aware(datetime.combine(end_date + timedelta(days=1), time.min))
+    ctas = ResourceCTA.objects.select_related("resource", "target_lesson").filter(
+        resource__status__in=[LearningResource.Status.READY, LearningResource.Status.PUBLISHED]
+    )
+    clicks = ResourceCTAClickEvent.objects.select_related("cta", "resource", "target_lesson", "user").filter(
+        occurred_at__gte=start_dt, occurred_at__lt=end_dt
+    )
+    conversions = ResourceLessonConversionEvent.objects.select_related("cta", "resource", "lesson", "user", "subscriber").filter(
+        occurred_at__gte=start_dt, occurred_at__lt=end_dt, cta__isnull=False
+    )
+    if target_type:
+        ctas = ctas.filter(target_type=target_type)
+        clicks = clicks.filter(cta__target_type=target_type)
+        conversions = conversions.filter(cta__target_type=target_type)
+    if resource_type:
+        ctas = ctas.filter(resource__resource_type=resource_type)
+        clicks = clicks.filter(resource__resource_type=resource_type)
+        conversions = conversions.filter(resource__resource_type=resource_type)
+    rows = []
+    for cta in ctas.order_by("resource__title", "position"):
+        cta_clicks = clicks.filter(cta=cta).count()
+        cta_conversions = conversions.filter(cta=cta).count()
+        lesson_views = conversions.filter(cta=cta, event_type=ResourceLessonConversionEvent.EventType.LESSON_VIEW).count()
+        quiz_attempts = conversions.filter(cta=cta, event_type=ResourceLessonConversionEvent.EventType.QUIZ_ATTEMPT).count()
+        challenge_attempts = conversions.filter(cta=cta, event_type=ResourceLessonConversionEvent.EventType.CHALLENGE_ATTEMPT).count()
+        completions = conversions.filter(cta=cta, event_type=ResourceLessonConversionEvent.EventType.LESSON_COMPLETE).count()
+        rows.append({
+            "cta": cta,
+            "clicks": cta_clicks,
+            "lesson_views": lesson_views,
+            "quiz_attempts": quiz_attempts,
+            "challenge_attempts": challenge_attempts,
+            "lesson_completions": completions,
+            "total_conversions": cta_conversions,
+            "conversion_rate": round(cta_conversions / cta_clicks * 100, 2) if cta_clicks else None,
+            "completion_rate": round(completions / cta_clicks * 100, 2) if cta_clicks else None,
+        })
+    rows.sort(key=lambda row: (row["lesson_completions"], row["total_conversions"], row["clicks"]), reverse=True)
+    return rows, clicks, conversions, start_date, end_date, target_type, resource_type
+
+
+class ResourceCTAReportView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/resource_cta_report.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        rows, clicks, conversions, start_date, end_date, target_type, resource_type = _resource_cta_report_data(self.request)
+        totals = {
+            "clicks": sum(row["clicks"] for row in rows),
+            "lesson_views": sum(row["lesson_views"] for row in rows),
+            "quiz_attempts": sum(row["quiz_attempts"] for row in rows),
+            "challenge_attempts": sum(row["challenge_attempts"] for row in rows),
+            "lesson_completions": sum(row["lesson_completions"] for row in rows),
+            "total_conversions": sum(row["total_conversions"] for row in rows),
+        }
+        totals["conversion_rate"] = round(totals["total_conversions"] / totals["clicks"] * 100, 2) if totals["clicks"] else None
+        context.update({
+            "rows": rows,
+            "recent_clicks": clicks.order_by("-occurred_at")[:50],
+            "recent_conversions": conversions.order_by("-occurred_at")[:50],
+            "totals": totals,
+            "start_date": start_date,
+            "end_date": end_date,
+            "target_type": target_type,
+            "resource_type": resource_type,
+            "target_type_choices": ResourceCTA.TargetType.choices,
+            "resource_type_choices": LearningResource.ResourceType.choices,
+            "export_query": self.request.GET.urlencode(),
+        })
+        return context
+
+
+class ResourceCTAReportExportView(StaffRequiredMixin, TemplateView):
+    def get(self, request, *args, **kwargs):
+        rows, clicks, conversions, start_date, end_date, target_type, resource_type = _resource_cta_report_data(request)
+        section = request.GET.get("section", "ctas")
+        response = _csv_response(f"code-with-michael-resource-ctas-{section}-{start_date}-to-{end_date}.csv")
+        writer = csv.writer(response)
+        if section == "clicks":
+            writer.writerow(["Occurred At", "Resource", "Resource Type", "CTA", "CTA Type", "Target Lesson", "Target URL", "User", "Referrer"])
+            for click in clicks.order_by("-occurred_at"):
+                writer.writerow([timezone.localtime(click.occurred_at).strftime("%Y-%m-%d %H:%M"), click.resource.title, click.resource.get_resource_type_display(), click.cta.title, click.cta.get_target_type_display(), click.target_lesson.title if click.target_lesson else "", click.target_url, click.user.email if click.user else "", click.referrer])
+        elif section == "conversions":
+            writer.writerow(["Occurred At", "Conversion", "Resource", "CTA", "CTA Type", "Lesson", "User", "Email"])
+            for event in conversions.order_by("-occurred_at"):
+                writer.writerow([timezone.localtime(event.occurred_at).strftime("%Y-%m-%d %H:%M"), event.get_event_type_display(), event.resource.title, event.cta.title if event.cta else "", event.cta.get_target_type_display() if event.cta else "", event.lesson.title if event.lesson else "", event.user.email if event.user else "", event.email])
+        else:
+            writer.writerow(["Resource", "Resource Type", "CTA", "CTA Type", "Button", "Target Lesson", "Clicks", "Lesson Views", "Quiz Attempts", "Challenge Attempts", "Lesson Completions", "Total Conversions", "Conversion Rate", "Completion Rate"])
+            for row in rows:
+                cta = row["cta"]
+                writer.writerow([cta.resource.title, cta.resource.get_resource_type_display(), cta.title, cta.get_target_type_display(), cta.button_label, cta.target_lesson.title if cta.target_lesson else "", row["clicks"], row["lesson_views"], row["quiz_attempts"], row["challenge_attempts"], row["lesson_completions"], row["total_conversions"], row["conversion_rate"] if row["conversion_rate"] is not None else "", row["completion_rate"] if row["completion_rate"] is not None else ""])
+        return response
+
+
+class ContentPlanCreateView(StaffRequiredMixin, CreateView):
+    model = ContentPlan
+    form_class = ContentPlanForm
+    template_name = "studio/content_plan_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.lesson = get_object_or_404(Lesson, slug=kwargs["slug"])
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["lesson"] = self.lesson
+        return kwargs
+
+    def get_initial(self):
+        initial = super().get_initial()
+        platform = self.request.GET.get("platform")
+        valid_platforms = {choice[0] for choice in ContentPlan.Platform.choices}
+        if platform in valid_platforms:
+            initial["platform"] = platform
+        scheduled_at = self.request.GET.get("scheduled_at")
+        if scheduled_at:
+            initial["scheduled_at"] = scheduled_at
+        carousel_template = self.request.GET.get("carousel_template")
+        if carousel_template:
+            initial["carousel_template"] = carousel_template
+        return initial
+
+    def form_valid(self, form):
+        form.instance.lesson = self.lesson
+        form.instance.created_by = self.request.user
+        messages.success(self.request, "Content plan saved.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        week = self.object.week_start.isoformat() if self.object.scheduled_at else timezone.localdate().isoformat()
+        return reverse("studio:content-planner") + f"?week={week}"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.lesson
+        context["form_title"] = "Plan a post"
+        return context
+
+
+class ContentPlanUpdateView(StaffRequiredMixin, UpdateView):
+    model = ContentPlan
+    form_class = ContentPlanForm
+    template_name = "studio/content_plan_form.html"
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["lesson"] = self.object.lesson
+        return kwargs
+
+    def form_valid(self, form):
+        messages.success(self.request, "Content plan updated.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("studio:content-planner") + f"?week={self.object.week_start.isoformat()}"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.object.lesson
+        context["form_title"] = "Edit planned post"
+        return context
+
+
+class ContentPlanDeleteView(StaffRequiredMixin, DeleteView):
+    model = ContentPlan
+    template_name = "studio/content_plan_confirm_delete.html"
+
+    def get_success_url(self):
+        return reverse("studio:content-planner") + f"?week={self.object.week_start.isoformat()}"
+
+
+
+@require_POST
+def newsletter_signup(request):
+    form = NewsletterSignupForm(request.POST)
+    next_url = request.POST.get("next") or reverse("learn:home")
+    source = request.POST.get("source") or NewsletterSubscriber.Source.LEARN_HOME
+    lesson = None
+    resource = None
+    lesson_slug = request.POST.get("lesson_slug")
+    resource_slug = request.POST.get("resource_slug")
+    if lesson_slug:
+        lesson = Lesson.objects.filter(slug=lesson_slug).first()
+    if resource_slug:
+        resource = LearningResource.objects.filter(slug=resource_slug).first()
+
+    if form.is_valid():
+        email = form.cleaned_data["email"]
+        defaults = {
+            "first_name": form.cleaned_data.get("first_name", ""),
+            "source": source if source in dict(NewsletterSubscriber.Source.choices) else NewsletterSubscriber.Source.OTHER,
+            "source_url": request.build_absolute_uri(next_url)[:300],
+            "source_lesson": lesson,
+            "source_resource": resource,
+            "user": request.user if request.user.is_authenticated else None,
+            "status": NewsletterSubscriber.Status.ACTIVE,
+            "unsubscribed_at": None,
+        }
+        subscriber, created = NewsletterSubscriber.objects.update_or_create(
+            email=email, defaults=defaults
+        )
+        if not created and subscriber.status != NewsletterSubscriber.Status.ACTIVE:
+            subscriber.mark_active()
+            subscriber.save(update_fields=["status", "unsubscribed_at", "subscribed_at", "updated_at"])
+        messages.success(request, "You're on the Code with Michael email list.")
+    else:
+        messages.error(request, "Please enter a valid email address to join the list.")
+    return redirect(next_url)
+
+
+def _newsletter_campaign_draft_for_lesson(lesson):
+    objective = lesson.learning_objective or f"practice {lesson.title.lower()}"
+    takeaway = lesson.beginner_takeaway or lesson.summary or "one small Python idea you can use right away"
+    prompt = lesson.practice_prompt or "Try changing the example code and run it again."
+    cta = f"Open the lesson: {lesson.title}"
+    body = f"""Hi there,
+
+This week's beginner Python lesson is: {lesson.title}.
+
+What you'll practice:
+{objective}
+
+The main idea:
+{takeaway}
+
+Try this:
+{prompt}
+
+A common mistake to watch for:
+{lesson.common_mistake or 'Do not rush past the output. Read what Python prints and compare it with what you expected.'}
+
+Keep going — small, consistent practice is how Python starts to feel natural.
+
+Michael
+"""
+    return {
+        "title": f"Weekly Python: {lesson.title}",
+        "subject": f"Practice Python: {lesson.title}",
+        "preview_text": takeaway[:220],
+        "body": body,
+        "call_to_action": cta,
+        "target_segment": NewsletterCampaign.Segment.ALL_ACTIVE,
+        "estimated_recipients": NewsletterSubscriber.objects.filter(status=NewsletterSubscriber.Status.ACTIVE).count(),
+    }
+
+
+class NewsletterCampaignListView(StaffRequiredMixin, ListView):
+    model = NewsletterCampaign
+    template_name = "studio/newsletter_campaigns.html"
+    context_object_name = "campaigns"
+    paginate_by = 40
+
+    def get_queryset(self):
+        queryset = NewsletterCampaign.objects.select_related("lesson", "content_plan", "publishing_record", "created_by", "saved_segment")
+        status = self.request.GET.get("status", "")
+        segment = self.request.GET.get("segment", "")
+        saved_segment = self.request.GET.get("saved_segment", "")
+        provider = self.request.GET.get("provider", "")
+        sync_status = self.request.GET.get("sync_status", "")
+        query = self.request.GET.get("q", "").strip()
+        if status:
+            queryset = queryset.filter(status=status)
+        if segment:
+            queryset = queryset.filter(target_segment=segment)
+        if saved_segment:
+            queryset = queryset.filter(saved_segment_id=saved_segment)
+        if provider:
+            queryset = queryset.filter(external_provider=provider)
+        if sync_status:
+            queryset = queryset.filter(provider_sync_status=sync_status)
+        if query:
+            queryset = queryset.filter(
+                Q(title__icontains=query)
+                | Q(subject__icontains=query)
+                | Q(preview_text__icontains=query)
+                | Q(body__icontains=query)
+                | Q(lesson__title__icontains=query)
+                | Q(external_campaign_id__icontains=query)
+                | Q(external_audience_id__icontains=query)
+                | Q(provider_notes__icontains=query)
+            )
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["query"] = self.request.GET.get("q", "")
+        context["status_filter"] = self.request.GET.get("status", "")
+        context["segment_filter"] = self.request.GET.get("segment", "")
+        context["saved_segment_filter"] = self.request.GET.get("saved_segment", "")
+        context["provider_filter"] = self.request.GET.get("provider", "")
+        context["sync_status_filter"] = self.request.GET.get("sync_status", "")
+        context["provider_choices"] = [(value, label) for value, label in EmailProvider.choices if value != EmailProvider.NONE]
+        context["sync_status_choices"] = ProviderSyncStatus.choices
+        context["status_choices"] = NewsletterCampaign.Status.choices
+        context["segment_choices"] = NewsletterCampaign.Segment.choices
+        context["saved_segments"] = SubscriberSegment.objects.filter(is_active=True).order_by("name")
+        context["draft_count"] = NewsletterCampaign.objects.filter(status=NewsletterCampaign.Status.DRAFT).count()
+        context["scheduled_count"] = NewsletterCampaign.objects.filter(status=NewsletterCampaign.Status.SCHEDULED).count()
+        context["sent_count"] = NewsletterCampaign.objects.filter(status=NewsletterCampaign.Status.SENT).count()
+        context["active_subscribers"] = NewsletterSubscriber.objects.filter(status=NewsletterSubscriber.Status.ACTIVE).count()
+        return context
+
+
+class NewsletterCampaignCreateView(StaffRequiredMixin, CreateView):
+    model = NewsletterCampaign
+    form_class = NewsletterCampaignForm
+    template_name = "studio/newsletter_campaign_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.lesson = None
+        slug = kwargs.get("slug") or request.GET.get("lesson")
+        if slug:
+            self.lesson = get_object_or_404(Lesson, slug=slug)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_initial(self):
+        initial = super().get_initial()
+        if self.lesson:
+            initial.update(_newsletter_campaign_draft_for_lesson(self.lesson))
+            initial["lesson"] = self.lesson
+        scheduled_at = self.request.GET.get("scheduled_at")
+        if scheduled_at:
+            initial["scheduled_at"] = scheduled_at
+            initial["status"] = NewsletterCampaign.Status.SCHEDULED
+        plan_id = self.request.GET.get("plan")
+        if plan_id:
+            plan = ContentPlan.objects.filter(pk=plan_id, platform=ContentPlan.Platform.EMAIL).first()
+            if plan:
+                initial["content_plan"] = plan
+                initial.setdefault("lesson", plan.lesson)
+                initial.setdefault("scheduled_at", plan.scheduled_at)
+                initial.setdefault("status", NewsletterCampaign.Status.SCHEDULED)
+        return initial
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["lesson"] = self.lesson
+        return kwargs
+
+    def form_valid(self, form):
+        form.instance.created_by = self.request.user
+        if form.instance.content_plan and not form.instance.lesson_id:
+            form.instance.lesson = form.instance.content_plan.lesson
+        if form.instance.saved_segment_id and not form.instance.estimated_recipients:
+            form.instance.estimated_recipients = form.instance.saved_segment.subscriber_count
+        elif not form.instance.estimated_recipients:
+            form.instance.estimated_recipients = form.instance.estimated_segment_count
+        messages.success(self.request, "Newsletter campaign saved.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("studio:newsletter-campaign-list")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.lesson
+        context["form_title"] = "Plan newsletter campaign"
+        return context
+
+
+class NewsletterCampaignUpdateView(StaffRequiredMixin, UpdateView):
+    model = NewsletterCampaign
+    form_class = NewsletterCampaignForm
+    template_name = "studio/newsletter_campaign_form.html"
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["lesson"] = self.object.lesson
+        return kwargs
+
+    def form_valid(self, form):
+        if form.instance.saved_segment_id and not form.instance.estimated_recipients:
+            form.instance.estimated_recipients = form.instance.saved_segment.subscriber_count
+        messages.success(self.request, "Newsletter campaign updated.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("studio:newsletter-campaign-list")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.object.lesson
+        context["form_title"] = "Edit newsletter campaign"
+        return context
+
+
+class NewsletterCampaignDeleteView(StaffRequiredMixin, DeleteView):
+    model = NewsletterCampaign
+    template_name = "studio/newsletter_campaign_confirm_delete.html"
+    success_url = reverse_lazy("studio:newsletter-campaign-list")
+
+
+@staff_required
+@require_POST
+def mark_newsletter_campaign_sent(request, pk):
+    campaign = get_object_or_404(NewsletterCampaign, pk=pk)
+    campaign.mark_sent()
+    campaign.actual_recipients = campaign.actual_recipients or campaign.estimated_recipients
+    campaign.save(update_fields=["status", "sent_at", "actual_recipients", "updated_at"])
+    if campaign.content_plan and campaign.content_plan.status != ContentPlan.Status.POSTED:
+        campaign.content_plan.status = ContentPlan.Status.POSTED
+        campaign.content_plan.save(update_fields=["status", "updated_at"])
+    messages.success(request, "Newsletter campaign marked as sent. Add performance metrics when they are available.")
+    return redirect("studio:newsletter-campaign-list")
+
+
+class NewsletterMetricImportView(StaffRequiredMixin, FormView):
+    template_name = "studio/newsletter_metric_import.html"
+    form_class = NewsletterMetricImportForm
+
+    def dispatch(self, request, *args, **kwargs):
+        self.campaign = None
+        campaign_id = kwargs.get("pk") or request.GET.get("campaign")
+        if campaign_id:
+            self.campaign = get_object_or_404(NewsletterCampaign, pk=campaign_id)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["campaign"] = self.campaign
+        return kwargs
+
+    def form_valid(self, form):
+        source_text = form.source_text()
+        result = parse_newsletter_metrics(source_text)
+        if not result.has_metrics:
+            for warning in result.warnings:
+                messages.error(self.request, warning)
+            return self.form_invalid(form)
+
+        campaign = form.cleaned_data["campaign"]
+        upload = form.cleaned_data.get("metrics_file")
+        normalized = {field: result.metrics.get(field) or 0 for field in ("actual_recipients", "opens", "clicks", "unsubscribes", "bounces")}
+        normalized["matched_labels"] = result.matched_labels
+        normalized["rows_seen"] = result.rows_seen
+        metric_import = NewsletterMetricImport.objects.create(
+            campaign=campaign,
+            provider=form.cleaned_data["provider"],
+            source_filename=getattr(upload, "name", "") if upload else "",
+            raw_payload=source_text[:20000],
+            normalized_data=normalized,
+            actual_recipients=normalized["actual_recipients"],
+            opens=normalized["opens"],
+            clicks=normalized["clicks"],
+            unsubscribes=normalized["unsubscribes"],
+            bounces=normalized["bounces"],
+            warnings=result.warnings,
+            imported_by=self.request.user,
+            notes=form.cleaned_data.get("notes", ""),
+        )
+        metric_import.apply_to_campaign(mark_sent=form.cleaned_data.get("mark_sent"))
+        if campaign.content_plan and campaign.content_plan.status != ContentPlan.Status.POSTED and form.cleaned_data.get("mark_sent"):
+            campaign.content_plan.status = ContentPlan.Status.POSTED
+            campaign.content_plan.save(update_fields=["status", "updated_at"])
+        messages.success(
+            self.request,
+            f"Imported newsletter metrics for {campaign.title}: {metric_import.actual_recipients} recipients, {metric_import.opens} opens, {metric_import.clicks} clicks.",
+        )
+        for warning in result.warnings:
+            messages.warning(self.request, warning)
+        return redirect("studio:newsletter-campaign-list")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["campaign"] = self.campaign
+        context["recent_imports"] = NewsletterMetricImport.objects.select_related("campaign", "imported_by").order_by("-applied_at")[:12]
+        return context
+
+
+class NewsletterSubscriberListView(StaffRequiredMixin, ListView):
+    model = NewsletterSubscriber
+    template_name = "studio/newsletter_subscribers.html"
+    context_object_name = "subscribers"
+    paginate_by = 50
+
+    def get_queryset(self):
+        queryset = NewsletterSubscriber.objects.select_related("source_lesson", "source_resource", "user")
+        status = self.request.GET.get("status", "")
+        source = self.request.GET.get("source", "")
+        provider = self.request.GET.get("provider", "")
+        sync_status = self.request.GET.get("sync_status", "")
+        query = self.request.GET.get("q", "").strip()
+        if status:
+            queryset = queryset.filter(status=status)
+        if source:
+            queryset = queryset.filter(source=source)
+        if provider:
+            queryset = queryset.filter(external_provider=provider)
+        if sync_status:
+            queryset = queryset.filter(provider_sync_status=sync_status)
+        if query:
+            queryset = queryset.filter(
+                Q(email__icontains=query)
+                | Q(first_name__icontains=query)
+                | Q(source_lesson__title__icontains=query)
+                | Q(source_resource__title__icontains=query)
+                | Q(notes__icontains=query)
+                | Q(provider_notes__icontains=query)
+                | Q(external_contact_id__icontains=query)
+                | Q(external_list_id__icontains=query)
+            )
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["status_choices"] = NewsletterSubscriber.Status.choices
+        context["source_choices"] = NewsletterSubscriber.Source.choices
+        context["status_filter"] = self.request.GET.get("status", "")
+        context["source_filter"] = self.request.GET.get("source", "")
+        context["provider_filter"] = self.request.GET.get("provider", "")
+        context["sync_status_filter"] = self.request.GET.get("sync_status", "")
+        context["provider_choices"] = [(value, label) for value, label in EmailProvider.choices if value != EmailProvider.NONE]
+        context["sync_status_choices"] = ProviderSyncStatus.choices
+        context["query"] = self.request.GET.get("q", "")
+        context["active_count"] = NewsletterSubscriber.objects.filter(status=NewsletterSubscriber.Status.ACTIVE).count()
+        context["total_count"] = NewsletterSubscriber.objects.count()
+        context["recent_count"] = NewsletterSubscriber.objects.filter(subscribed_at__gte=timezone.now() - timedelta(days=30)).count()
+        context["export_query"] = self.request.GET.urlencode()
+        return context
+
+
+class NewsletterSubscriberUpdateView(StaffRequiredMixin, UpdateView):
+    model = NewsletterSubscriber
+    form_class = NewsletterSubscriberForm
+    template_name = "studio/newsletter_subscriber_form.html"
+
+    def get_success_url(self):
+        return reverse("studio:newsletter-subscriber-list")
+
+    def form_valid(self, form):
+        messages.success(self.request, "Subscriber updated.")
+        return super().form_valid(form)
+
+
+class NewsletterSubscriberExportView(StaffRequiredMixin, TemplateView):
+    def get(self, request, *args, **kwargs):
+        list_view = NewsletterSubscriberListView()
+        list_view.request = request
+        subscribers = list_view.get_queryset()
+        status_label = request.GET.get("status") or "all"
+        response = _csv_response(f"code-with-michael-newsletter-subscribers-{status_label}.csv")
+        writer = csv.writer(response)
+        writer.writerow(["Email", "First Name", "Status", "Source", "Source Lesson", "Source Resource", "Subscribed At", "Unsubscribed At", "Source URL", "Provider", "Provider Contact ID", "Provider List ID", "Provider Sync Status", "Provider Last Synced At", "Provider Notes", "Notes"])
+        for subscriber in subscribers:
+            writer.writerow([
+                subscriber.email,
+                subscriber.first_name,
+                subscriber.get_status_display(),
+                subscriber.get_source_display(),
+                subscriber.source_lesson.title if subscriber.source_lesson else "",
+                subscriber.source_resource.title if subscriber.source_resource else "",
+                timezone.localtime(subscriber.subscribed_at).strftime("%Y-%m-%d %H:%M") if subscriber.subscribed_at else "",
+                timezone.localtime(subscriber.unsubscribed_at).strftime("%Y-%m-%d %H:%M") if subscriber.unsubscribed_at else "",
+                subscriber.source_url,
+                subscriber.get_external_provider_display(),
+                subscriber.external_contact_id,
+                subscriber.external_list_id,
+                subscriber.get_provider_sync_status_display(),
+                timezone.localtime(subscriber.provider_last_synced_at).strftime("%Y-%m-%d %H:%M") if subscriber.provider_last_synced_at else "",
+                subscriber.provider_notes,
+                subscriber.notes,
+            ])
+        return response
+
+
+class SubscriberSegmentListView(StaffRequiredMixin, ListView):
+    model = SubscriberSegment
+    template_name = "studio/subscriber_segments.html"
+    context_object_name = "segments"
+    paginate_by = 40
+
+    def get_queryset(self):
+        queryset = SubscriberSegment.objects.select_related("source_lesson", "created_by")
+        query = self.request.GET.get("q", "").strip()
+        active = self.request.GET.get("active", "")
+        if query:
+            queryset = queryset.filter(
+                Q(name__icontains=query)
+                | Q(description__icontains=query)
+                | Q(search_text__icontains=query)
+                | Q(source_lesson__title__icontains=query)
+                | Q(source_resource__title__icontains=query)
+                | Q(notes__icontains=query)
+                | Q(provider_notes__icontains=query)
+                | Q(external_segment_id__icontains=query)
+                | Q(external_audience_id__icontains=query)
+            )
+        if active == "yes":
+            queryset = queryset.filter(is_active=True)
+        elif active == "no":
+            queryset = queryset.filter(is_active=False)
+        return queryset
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        segments = list(context["segments"])
+        context["segment_rows"] = [
+            {"segment": segment, "subscriber_count": segment.subscriber_count}
+            for segment in segments
+        ]
+        context["query"] = self.request.GET.get("q", "")
+        context["active_filter"] = self.request.GET.get("active", "")
+        context["active_segment_count"] = SubscriberSegment.objects.filter(is_active=True).count()
+        context["total_segment_count"] = SubscriberSegment.objects.count()
+        context["active_subscriber_count"] = NewsletterSubscriber.objects.filter(status=NewsletterSubscriber.Status.ACTIVE).count()
+        return context
+
+
+class SubscriberSegmentCreateView(StaffRequiredMixin, CreateView):
+    model = SubscriberSegment
+    form_class = SubscriberSegmentForm
+    template_name = "studio/subscriber_segment_form.html"
+
+    def form_valid(self, form):
+        form.instance.created_by = self.request.user
+        messages.success(self.request, "Subscriber segment saved.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("studio:subscriber-segment-list")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["form_title"] = "Create subscriber segment"
+        return context
+
+
+class SubscriberSegmentUpdateView(StaffRequiredMixin, UpdateView):
+    model = SubscriberSegment
+    form_class = SubscriberSegmentForm
+    template_name = "studio/subscriber_segment_form.html"
+
+    def form_valid(self, form):
+        messages.success(self.request, "Subscriber segment updated.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("studio:subscriber-segment-list")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["form_title"] = "Edit subscriber segment"
+        context["subscriber_count"] = self.object.subscriber_count
+        return context
+
+
+class SubscriberSegmentDeleteView(StaffRequiredMixin, DeleteView):
+    model = SubscriberSegment
+    template_name = "studio/subscriber_segment_confirm_delete.html"
+    success_url = reverse_lazy("studio:subscriber-segment-list")
+
+
+class SubscriberSegmentExportView(StaffRequiredMixin, TemplateView):
+    def get(self, request, pk, *args, **kwargs):
+        segment = get_object_or_404(SubscriberSegment, pk=pk)
+        response = _csv_response(f"code-with-michael-segment-{segment.slug}-subscribers.csv")
+        writer = csv.writer(response)
+        writer.writerow(["Email", "First Name", "Status", "Source", "Skill Level", "Source Lesson", "Subscribed At", "Source URL", "Provider", "Provider Contact ID", "Provider List ID", "Provider Sync Status", "Provider Last Synced At", "Provider Notes", "Notes"])
+        for subscriber in segment.matching_subscribers():
+            writer.writerow([
+                subscriber.email,
+                subscriber.first_name,
+                subscriber.get_status_display(),
+                subscriber.get_source_display(),
+                subscriber.user.get_skill_level_display() if subscriber.user_id else "",
+                subscriber.source_lesson.title if subscriber.source_lesson else "",
+                subscriber.source_resource.title if subscriber.source_resource else "",
+                timezone.localtime(subscriber.subscribed_at).strftime("%Y-%m-%d %H:%M") if subscriber.subscribed_at else "",
+                subscriber.source_url,
+                subscriber.get_external_provider_display(),
+                subscriber.external_contact_id,
+                subscriber.external_list_id,
+                subscriber.get_provider_sync_status_display(),
+                timezone.localtime(subscriber.provider_last_synced_at).strftime("%Y-%m-%d %H:%M") if subscriber.provider_last_synced_at else "",
+                subscriber.provider_notes,
+                subscriber.notes,
+            ])
+        return response
+
+
+def _newsletter_segment_performance_rows():
+    campaigns = NewsletterCampaign.objects.select_related("saved_segment").filter(status=NewsletterCampaign.Status.SENT)
+    buckets = {}
+    for campaign in campaigns:
+        if campaign.saved_segment_id:
+            key = f"saved:{campaign.saved_segment_id}"
+            label = campaign.saved_segment.name
+            source = "Saved segment"
+        else:
+            key = f"legacy:{campaign.target_segment}"
+            label = campaign.get_target_segment_display()
+            source = "Legacy quick segment"
+        bucket = buckets.setdefault(key, {
+            "label": label,
+            "source": source,
+            "campaigns": 0,
+            "recipients": 0,
+            "opens": 0,
+            "clicks": 0,
+            "unsubscribes": 0,
+            "bounces": 0,
+            "open_rate": None,
+            "click_rate": None,
+            "click_to_open_rate": None,
+        })
+        bucket["campaigns"] += 1
+        bucket["recipients"] += campaign.actual_recipients or campaign.estimated_recipients or 0
+        bucket["opens"] += campaign.opens or 0
+        bucket["clicks"] += campaign.clicks or 0
+        bucket["unsubscribes"] += campaign.unsubscribes or 0
+        bucket["bounces"] += campaign.bounces or 0
+    for bucket in buckets.values():
+        if bucket["recipients"]:
+            bucket["open_rate"] = round(bucket["opens"] / bucket["recipients"] * 100, 2)
+            bucket["click_rate"] = round(bucket["clicks"] / bucket["recipients"] * 100, 2)
+        if bucket["opens"]:
+            bucket["click_to_open_rate"] = round(bucket["clicks"] / bucket["opens"] * 100, 2)
+    return sorted(buckets.values(), key=lambda row: (row["clicks"], row["open_rate"] or 0, row["campaigns"]), reverse=True)
+
+
+class NewsletterSegmentPerformanceView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/newsletter_segment_performance.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["rows"] = _newsletter_segment_performance_rows()
+        context["sent_campaigns"] = NewsletterCampaign.objects.filter(status=NewsletterCampaign.Status.SENT).count()
+        context["active_segments"] = SubscriberSegment.objects.filter(is_active=True).count()
+        return context
+
+
+class NewsletterSegmentPerformanceExportView(StaffRequiredMixin, TemplateView):
+    def get(self, request, *args, **kwargs):
+        response = _csv_response("code-with-michael-newsletter-segment-performance.csv")
+        writer = csv.writer(response)
+        writer.writerow(["Segment", "Source", "Campaigns", "Recipients", "Opens", "Open Rate", "Clicks", "Click Rate", "Click-to-open Rate", "Unsubscribes", "Bounces"])
+        for row in _newsletter_segment_performance_rows():
+            writer.writerow([row["label"], row["source"], row["campaigns"], row["recipients"], row["opens"], row["open_rate"] if row["open_rate"] is not None else "", row["clicks"], row["click_rate"] if row["click_rate"] is not None else "", row["click_to_open_rate"] if row["click_to_open_rate"] is not None else "", row["unsubscribes"], row["bounces"]])
+        return response
+
+
+
+class ProviderSyncReadinessView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/provider_sync_readiness.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        record_type = self.request.GET.get("record_type", "")
+        provider = self.request.GET.get("provider", "")
+        sync_status = self.request.GET.get("sync_status", "")
+        issue = self.request.GET.get("issue", "")
+        rows = provider_readiness_rows(
+            record_type=record_type,
+            provider=provider,
+            sync_status=sync_status,
+            issue=issue,
+        )
+        context.update({
+            "rows": rows,
+            "summary": provider_readiness_summary(rows),
+            "record_type_filter": record_type,
+            "provider_filter": provider,
+            "sync_status_filter": sync_status,
+            "issue_filter": issue,
+            "record_type_choices": RECORD_TYPE_LABELS.items(),
+            "provider_choices": EmailProvider.choices,
+            "sync_status_choices": ProviderSyncStatus.choices,
+            "issue_choices": ISSUE_LABELS.items(),
+            "export_query": self.request.GET.urlencode(),
+        })
+        return context
+
+
+class ProviderSyncReadinessExportView(StaffRequiredMixin, TemplateView):
+    def get(self, request, *args, **kwargs):
+        rows = provider_readiness_rows(
+            record_type=request.GET.get("record_type", ""),
+            provider=request.GET.get("provider", ""),
+            sync_status=request.GET.get("sync_status", ""),
+            issue=request.GET.get("issue", ""),
+        )
+        response = _csv_response("code-with-michael-provider-sync-readiness.csv")
+        writer = csv.writer(response)
+        writer.writerow([
+            "Record Type",
+            "Name / Email",
+            "Provider",
+            "Sync Status",
+            "Readiness Issue",
+            "Missing Fields",
+            "External ID",
+            "External Audience/List ID",
+            "Provider URL",
+            "Last Synced At",
+            "Provider Notes",
+        ])
+        for row in rows:
+            writer.writerow([
+                RECORD_TYPE_LABELS.get(row.record_type, row.record_type),
+                row.label,
+                row.provider_label,
+                row.sync_status_label,
+                row.issue_label,
+                "; ".join(row.missing_fields),
+                row.external_id,
+                row.external_audience_id,
+                row.provider_url,
+                row.last_synced_display,
+                row.notes,
+            ])
+        return response
+
+
+class PublicLearnHomeView(ListView):
+    model = Lesson
+    template_name = "learn/home.html"
+    context_object_name = "lessons"
+
+    def get_queryset(self):
+        return (
+            _public_lessons_queryset()
+            .select_related("category", "series")
+            .order_by("series__title", "series_position", "title")[:12]
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["series_list"] = (
+            Series.objects.filter(is_active=True, lessons__website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED])
+            .annotate(published_lessons=Count("lessons", filter=Q(lessons__website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED])))
+            .order_by("title")
+            .distinct()
+        )
+        context["playground_lessons"] = (
+            Lesson.objects.filter(enable_playground=True, website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED])
+            .select_related("category", "series")[:6]
+        )
+        context["canonical_url"] = absolute_url(reverse("learn:home"), request=self.request)
+        context["structured_data"] = website_schema(request=self.request)
+        context["newsletter_form"] = NewsletterSignupForm()
+        context["newsletter_source"] = NewsletterSubscriber.Source.LEARN_HOME
+        context["featured_resources"] = _public_resources_queryset().filter(featured=True).select_related("category")[:6]
+        return context
+
+
+class PublicLessonListView(ListView):
+    model = Lesson
+    template_name = "learn/lesson_list.html"
+    context_object_name = "lessons"
+    paginate_by = 24
+
+    def get_queryset(self):
+        queryset = (
+            _public_lessons_queryset()
+            .select_related("category", "series")
+            .prefetch_related("tags")
+        )
+        query = self.request.GET.get("q", "").strip()
+        if query:
+            queryset = queryset.filter(
+                Q(title__icontains=query)
+                | Q(summary__icontains=query)
+                | Q(learning_objective__icontains=query)
+                | Q(beginner_takeaway__icontains=query)
+                | Q(category__name__icontains=query)
+                | Q(tags__name__icontains=query)
+            )
+        return queryset.distinct().order_by("series__title", "series_position", "title")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["canonical_url"] = absolute_url(reverse("learn:lesson-list"), request=self.request)
+        return context
+
+
+class PublicSeriesDetailView(DetailView):
+    model = Series
+    template_name = "learn/series_detail.html"
+    context_object_name = "series"
+
+    def get_queryset(self):
+        return Series.objects.filter(is_active=True).prefetch_related(
+            Prefetch(
+                "lessons",
+                queryset=Lesson.objects.filter(website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED])
+                .exclude(status=Lesson.Status.ARCHIVED)
+                .select_related("category", "series")
+                .order_by("series_position", "title"),
+            )
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        lessons = list(self.object.lessons.all())
+        context["canonical_url"] = series_canonical_url(self.object, request=self.request)
+        context["structured_data"] = series_schema(self.object, lessons, request=self.request)
+        return context
+
+
+class PublicLessonDetailView(DetailView):
+    model = Lesson
+    template_name = "learn/lesson_detail.html"
+    context_object_name = "lesson"
+
+    def get_queryset(self):
+        return (
+            _public_lessons_queryset()
+            .select_related("category", "series", "next_lesson")
+            .prefetch_related("blocks", "tags", "code_challenges__test_cases", "quiz_questions__choices")
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        _track_resource_conversion(
+            self.request,
+            ResourceLessonConversionEvent.EventType.LESSON_VIEW,
+            lesson=self.object,
+            metadata={"source": "public_lesson_detail"},
+        )
+        payload = render_website_page(self.object, request=self.request, is_preview=False)[1]
+        context["page"] = payload["lesson"]
+        context["brand"] = payload["brand"]
+        context["canonical_url"] = lesson_canonical_url(self.object, request=self.request)
+        context["structured_data"] = lesson_schema(self.object, request=self.request)
+        if self.request.user.is_authenticated:
+            context["progress"] = LessonProgress.objects.filter(user=self.request.user, lesson=self.object).first()
+            context["quiz_attempts"] = {
+                attempt.question_id: attempt
+                for attempt in QuizAttempt.objects.filter(user=self.request.user, question__lesson=self.object).order_by("question_id", "-created_at")
+            }
+            context["lesson_challenge_attempts"] = (
+                ChallengeAttempt.objects.filter(user=self.request.user, challenge__lesson=self.object)
+                .select_related("challenge")
+                .order_by("-created_at")[:10]
+            )
+        context["newsletter_form"] = NewsletterSignupForm()
+        context["newsletter_source"] = NewsletterSubscriber.Source.LESSON
+        if self.object.series_id:
+            context["series_lessons"] = (
+                Lesson.objects.filter(series=self.object.series, website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED])
+                .exclude(status=Lesson.Status.ARCHIVED)
+                .order_by("series_position", "title")
+            )
+        return context
+
+
+class PublicResourceListView(ListView):
+    model = LearningResource
+    template_name = "learn/resource_list.html"
+    context_object_name = "resources"
+    paginate_by = 24
+
+    def get_queryset(self):
+        queryset = _public_resources_queryset().select_related("category").prefetch_related("tags", "related_lessons")
+        resource_type = self.request.GET.get("type", "").strip()
+        query = self.request.GET.get("q", "").strip()
+        if resource_type:
+            queryset = queryset.filter(resource_type=resource_type)
+        if query:
+            queryset = queryset.filter(
+                Q(title__icontains=query)
+                | Q(summary__icontains=query)
+                | Q(content__icontains=query)
+                | Q(beginner_tip__icontains=query)
+                | Q(category__name__icontains=query)
+                | Q(tags__name__icontains=query)
+            )
+        return queryset.distinct().order_by("resource_type", "title")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["resource_types"] = LearningResource.ResourceType.choices
+        context["selected_type"] = self.request.GET.get("type", "")
+        context["canonical_url"] = absolute_url(reverse("learn:resource-list"), request=self.request)
+        return context
+
+
+class PublicResourceDetailView(DetailView):
+    model = LearningResource
+    template_name = "learn/resource_detail.html"
+    context_object_name = "resource"
+
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        _track_resource_event(request, self.object, ResourcePerformanceEvent.EventType.VIEW)
+        context = self.get_context_data(object=self.object)
+        return self.render_to_response(context)
+
+    def get_queryset(self):
+        return _public_resources_queryset().select_related("category").prefetch_related("tags", "related_lessons")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["canonical_url"] = resource_canonical_url(self.object, request=self.request)
+        context["structured_data"] = resource_schema(self.object, request=self.request)
+        context["pdf_is_gated"] = self.object.pdf_download_enabled and self.object.pdf_requires_email
+        context["cta_blocks"] = self.object.cta_blocks.filter(is_active=True).select_related("target_lesson")
+        context["newsletter_form"] = NewsletterSignupForm()
+        context["newsletter_source"] = NewsletterSubscriber.Source.RESOURCE
+        return context
+
+
+class PublicResourcePDFGateView(DetailView):
+    model = LearningResource
+    template_name = "learn/resource_pdf_gate.html"
+    context_object_name = "resource"
+
+    def get_queryset(self):
+        return _public_resources_queryset().select_related("category").prefetch_related("related_lessons")
+
+    def dispatch(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if not self.object.pdf_download_enabled:
+            return redirect(self.object.public_url)
+        if not self.object.pdf_requires_email:
+            return redirect("learn:resource-pdf", slug=self.object.slug)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["form"] = kwargs.get("form") or NewsletterSignupForm()
+        context["canonical_url"] = absolute_url(reverse("learn:resource-pdf-gate", kwargs={"slug": self.object.slug}), request=self.request)
+        return context
+
+    def post(self, request, *args, **kwargs):
+        resource = self.object
+        form = NewsletterSignupForm(request.POST)
+        if not form.is_valid():
+            messages.error(request, "Please enter a valid email address to unlock the PDF.")
+            return self.render_to_response(self.get_context_data(form=form))
+
+        email = form.cleaned_data["email"]
+        first_name = form.cleaned_data.get("first_name", "")
+        source_url = request.build_absolute_uri(resource.public_url)[:300]
+        defaults = {
+            "first_name": first_name,
+            "source": NewsletterSubscriber.Source.RESOURCE,
+            "source_url": source_url,
+            "source_resource": resource,
+            "user": request.user if request.user.is_authenticated else None,
+            "status": NewsletterSubscriber.Status.ACTIVE,
+            "unsubscribed_at": None,
+            "consent_text": "Send me beginner Python lessons, practice prompts, Code with Michael updates, and this resource download.",
+        }
+        subscriber, created = NewsletterSubscriber.objects.update_or_create(email=email, defaults=defaults)
+        if not created and subscriber.status != NewsletterSubscriber.Status.ACTIVE:
+            subscriber.mark_active()
+            subscriber.source = NewsletterSubscriber.Source.RESOURCE
+            subscriber.source_resource = resource
+            subscriber.source_url = source_url
+            subscriber.user = request.user if request.user.is_authenticated else subscriber.user
+            subscriber.save(update_fields=["status", "unsubscribed_at", "subscribed_at", "source", "source_resource", "source_url", "user", "updated_at"])
+
+        access, _ = ResourceLeadMagnetAccess.objects.update_or_create(
+            resource=resource,
+            email=email,
+            defaults={
+                "subscriber": subscriber,
+                "user": request.user if request.user.is_authenticated else None,
+                "first_name": first_name,
+                "source_url": source_url,
+                "access_granted_at": timezone.now(),
+            },
+        )
+        _track_resource_event(request, resource, ResourcePerformanceEvent.EventType.PDF_UNLOCK, subscriber=subscriber, email=email)
+        request.session[_resource_pdf_unlock_session_key(resource)] = True
+        request.session[_resource_pdf_access_session_key(resource)] = access.pk
+        messages.success(request, "Your PDF is unlocked. The download is ready.")
+        return redirect("learn:resource-pdf", slug=resource.slug)
+
+
+class PublicResourcePDFDownloadView(DetailView):
+    model = LearningResource
+
+    def get_queryset(self):
+        return _public_resources_queryset().select_related("category").prefetch_related("related_lessons")
+
+    def get(self, request, *args, **kwargs):
+        resource = self.get_object()
+        if not resource.pdf_download_enabled:
+            return redirect(resource.public_url)
+        if resource.pdf_requires_email and not request.session.get(_resource_pdf_unlock_session_key(resource)):
+            return redirect("learn:resource-pdf-gate", slug=resource.slug)
+        access_id = request.session.get(_resource_pdf_access_session_key(resource))
+        subscriber = None
+        email = ""
+        if access_id:
+            access = ResourceLeadMagnetAccess.objects.filter(pk=access_id, resource=resource).select_related("subscriber").first()
+            if access:
+                access.register_download()
+                subscriber = access.subscriber
+                email = access.email
+        _track_resource_event(request, resource, ResourcePerformanceEvent.EventType.PDF_DOWNLOAD, subscriber=subscriber, email=email)
+        pdf_bytes = render_learning_resource_pdf(
+            resource,
+            site_url=absolute_url(reverse("learn:home"), request=request),
+        )
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{resource_pdf_filename(resource)}"'
+        return response
+
+
+class LearnerDashboardView(LoginRequiredMixin, TemplateView):
+    template_name = "learn/dashboard.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        progress = LessonProgress.objects.filter(user=user).select_related("lesson", "lesson__series", "lesson__category")
+        completed_count = progress.filter(status=LessonProgress.Status.COMPLETED).count()
+        in_progress_count = progress.filter(status=LessonProgress.Status.IN_PROGRESS).count()
+        week_start = timezone.now() - timedelta(days=7)
+        weekly_minutes = (
+            progress.filter(last_activity_at__gte=week_start).count() * 15
+            + QuizAttempt.objects.filter(user=user, created_at__gte=week_start).count() * 3
+            + ChallengeAttempt.objects.filter(user=user, created_at__gte=week_start).count() * 10
+        )
+        weekly_goal = max(1, getattr(user, "weekly_goal_minutes", 30) or 30)
+        context["learner_name"] = getattr(user, "learner_name", user.get_short_name())
+        context["progress_records"] = progress[:20]
+        context["completed_count"] = completed_count
+        context["in_progress_count"] = in_progress_count
+        context["quiz_correct_count"] = QuizAttempt.objects.filter(user=user, is_correct=True).count()
+        context["challenge_passed_count"] = ChallengeAttempt.objects.filter(user=user, passed=True).count()
+        context["badges"] = LearnerBadgeAward.objects.filter(user=user).select_related("badge")
+        context["recommended_lessons"] = _public_lessons_queryset().exclude(progress_records__user=user).select_related("category", "series")[:6]
+        context["estimated_learning_minutes"] = weekly_minutes
+        context["weekly_goal_minutes"] = weekly_goal
+        context["weekly_goal_percent"] = min(100, round(weekly_minutes / weekly_goal * 100))
+        context["recent_quiz_attempts"] = QuizAttempt.objects.filter(user=user).select_related("question", "question__lesson", "selected_choice")[:5]
+        context["recent_challenge_attempts"] = ChallengeAttempt.objects.filter(user=user).select_related("challenge", "challenge__lesson")[:5]
+        return context
+
+
+class LearnerActivityView(LoginRequiredMixin, TemplateView):
+    template_name = "learn/activity.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user = self.request.user
+        context["progress_records"] = LessonProgress.objects.filter(user=user).select_related("lesson", "lesson__series", "lesson__category")[:50]
+        context["quiz_attempts"] = QuizAttempt.objects.filter(user=user).select_related("question", "question__lesson", "selected_choice")[:50]
+        context["challenge_attempts"] = ChallengeAttempt.objects.filter(user=user).select_related("challenge", "challenge__lesson")[:50]
+        context["badge_awards"] = LearnerBadgeAward.objects.filter(user=user).select_related("badge")[:50]
+        return context
+
+
+@login_required
+def mark_lesson_complete(request, slug):
+    lesson = get_object_or_404(_public_lessons_queryset(), slug=slug)
+    if request.method != "POST":
+        return redirect("learn:lesson-detail", slug=lesson.slug)
+    progress, _ = LessonProgress.objects.get_or_create(user=request.user, lesson=lesson)
+    progress.mark_completed()
+    progress.save()
+    _track_resource_conversion(
+        request,
+        ResourceLessonConversionEvent.EventType.LESSON_COMPLETE,
+        lesson=lesson,
+        metadata={"status": progress.status},
+    )
+    awards = _award_earned_badges(request.user)
+    if awards:
+        messages.success(request, "Lesson completed. You also earned a new badge.")
+    else:
+        messages.success(request, "Lesson marked complete.")
+    return redirect("learn:lesson-detail", slug=lesson.slug)
+
+
+@login_required
+def submit_quiz_answer(request, question_pk):
+    question = get_object_or_404(
+        QuizQuestion.objects.select_related("lesson").prefetch_related("choices"),
+        pk=question_pk,
+        is_active=True,
+        lesson__website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED],
+    )
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required."}, status=405)
+    choice_id = request.POST.get("choice_id")
+    selected_choice = None
+    if choice_id:
+        selected_choice = get_object_or_404(question.choices, pk=choice_id)
+    is_correct = bool(selected_choice and selected_choice.is_correct)
+    feedback = "Correct. Nice work." if is_correct else "Not quite. Review the choices and try again."
+    attempt = QuizAttempt.objects.create(
+        question=question,
+        user=request.user,
+        selected_choice=selected_choice,
+        response_text=request.POST.get("response_text", ""),
+        is_correct=is_correct,
+        feedback=feedback,
+    )
+    _track_resource_conversion(
+        request,
+        ResourceLessonConversionEvent.EventType.QUIZ_ATTEMPT,
+        lesson=question.lesson,
+        metadata={"question_id": question.pk, "attempt_id": attempt.pk, "is_correct": is_correct},
+        dedupe=False,
+    )
+    _refresh_lesson_progress(request.user, question.lesson)
+    return JsonResponse({"correct": is_correct, "feedback": feedback})
+
+
+@login_required
+def submit_challenge_attempt(request, challenge_pk):
+    challenge = get_object_or_404(
+        CodeChallenge.objects.select_related("lesson").prefetch_related("test_cases"),
+        pk=challenge_pk,
+        is_active=True,
+        lesson__website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED],
+    )
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required."}, status=405)
+    submitted_code = request.POST.get("submitted_code", "")
+    observed_output = request.POST.get("observed_output", "")
+    raw_results = request.POST.get("test_results", "")
+    test_results = {}
+    if raw_results:
+        try:
+            test_results = json.loads(raw_results)
+        except json.JSONDecodeError:
+            test_results = {"error": "Submitted test results were not valid JSON."}
+
+    active_test_count = challenge.test_cases.filter(is_active=True).count()
+    tests_total = int(request.POST.get("tests_total") or active_test_count or 0)
+    tests_passed = int(request.POST.get("tests_passed") or 0)
+    client_passed = request.POST.get("passed") == "true"
+    passed = tests_total > 0 and tests_passed == tests_total if active_test_count else client_passed
+    feedback = (
+        f"Saved as passed. {tests_passed}/{tests_total} tests passed."
+        if passed and tests_total
+        else f"Saved. {tests_passed}/{tests_total} tests passed."
+        if tests_total
+        else ("Saved as passed." if passed else "Saved for review.")
+    )
+    attempt = ChallengeAttempt.objects.create(
+        challenge=challenge,
+        user=request.user,
+        submitted_code=submitted_code,
+        observed_output=observed_output,
+        test_results=test_results,
+        tests_passed=tests_passed,
+        tests_total=tests_total,
+        passed=passed,
+        feedback=feedback,
+    )
+    _track_resource_conversion(
+        request,
+        ResourceLessonConversionEvent.EventType.CHALLENGE_ATTEMPT,
+        lesson=challenge.lesson,
+        metadata={"challenge_id": challenge.pk, "attempt_id": attempt.pk, "passed": passed, "tests_passed": tests_passed, "tests_total": tests_total},
+        dedupe=False,
+    )
+    _refresh_lesson_progress(request.user, challenge.lesson)
+    return JsonResponse({
+        "passed": passed,
+        "feedback": feedback,
+        "tests_passed": tests_passed,
+        "tests_total": tests_total,
+        "attempt_url": reverse("learn:challenge-attempt-detail", kwargs={"pk": attempt.pk}),
+    })
+
+
+class ChallengeAttemptDetailView(LoginRequiredMixin, DetailView):
+    model = ChallengeAttempt
+    template_name = "learn/challenge_attempt_detail.html"
+    context_object_name = "attempt"
+
+    def get_queryset(self):
+        return (
+            ChallengeAttempt.objects.filter(user=self.request.user)
+            .select_related("challenge", "challenge__lesson", "challenge__lesson__series")
+            .prefetch_related("challenge__test_cases")
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        attempt = self.object
+        raw_results = attempt.test_results or []
+        if isinstance(raw_results, dict):
+            if isinstance(raw_results.get("results"), list):
+                results = raw_results["results"]
+            elif isinstance(raw_results.get("error"), str):
+                results = [{"name": "Saved test results", "passed": False, "observed": raw_results["error"]}]
+            else:
+                results = [
+                    {"name": str(key), "observed": value, "passed": False}
+                    for key, value in raw_results.items()
+                ]
+        elif isinstance(raw_results, list):
+            results = raw_results
+        else:
+            results = []
+        context["test_results_list"] = results
+        context["previous_attempts"] = (
+            ChallengeAttempt.objects.filter(user=self.request.user, challenge=attempt.challenge)
+            .exclude(pk=attempt.pk)
+            .order_by("-created_at")[:10]
+        )
+        return context
+
+
+class PublicPlaygroundView(TemplateView):
+    template_name = "learn/playground.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["canonical_url"] = absolute_url(reverse("learn:playground"), request=self.request)
+        return context
+
+
+class HelpView(StaffRequiredMixin, TemplateView):
     template_name = "studio/help.html"
 
 
-class LessonListView(LoginRequiredMixin, ListView):
+class LearningResourceListView(StaffRequiredMixin, ListView):
+    model = LearningResource
+    template_name = "studio/resource_list.html"
+    context_object_name = "resources"
+    paginate_by = 30
+
+    def get_queryset(self):
+        queryset = LearningResource.objects.select_related("category").prefetch_related("tags", "related_lessons")
+        query = self.request.GET.get("q", "").strip()
+        status = self.request.GET.get("status", "").strip()
+        resource_type = self.request.GET.get("type", "").strip()
+        if query:
+            queryset = queryset.filter(
+                Q(title__icontains=query)
+                | Q(summary__icontains=query)
+                | Q(content__icontains=query)
+                | Q(internal_notes__icontains=query)
+            )
+        if status:
+            queryset = queryset.filter(status=status)
+        if resource_type:
+            queryset = queryset.filter(resource_type=resource_type)
+        return queryset.distinct().order_by("resource_type", "title")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["resource_types"] = LearningResource.ResourceType.choices
+        context["statuses"] = LearningResource.Status.choices
+        return context
+
+
+class LearningResourceDetailView(StaffRequiredMixin, DetailView):
+    model = LearningResource
+    template_name = "studio/resource_detail.html"
+    context_object_name = "resource"
+
+    def get_queryset(self):
+        return LearningResource.objects.select_related("category").prefetch_related("tags", "related_lessons")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        events = self.object.performance_events.all()
+        views = events.filter(event_type=ResourcePerformanceEvent.EventType.VIEW).count()
+        unlocks = events.filter(event_type=ResourcePerformanceEvent.EventType.PDF_UNLOCK).count()
+        downloads = events.filter(event_type=ResourcePerformanceEvent.EventType.PDF_DOWNLOAD).count()
+        subscribers = NewsletterSubscriber.objects.filter(source_resource=self.object, status=NewsletterSubscriber.Status.ACTIVE).count()
+        context["resource_stats"] = {
+            "views": views,
+            "unlocks": unlocks,
+            "downloads": downloads,
+            "subscribers": subscribers,
+            "unlock_rate": round(unlocks / views * 100, 2) if views else None,
+            "download_rate": round(downloads / views * 100, 2) if views else None,
+            "subscriber_rate": round(subscribers / views * 100, 2) if views else None,
+        }
+        context["cta_blocks"] = self.object.cta_blocks.select_related("target_lesson").annotate(click_count=Count("click_events"))
+        context["recent_cta_clicks"] = self.object.cta_click_events.select_related("cta", "target_lesson", "user")[:12]
+        context["recent_resource_events"] = self.object.performance_events.select_related("subscriber", "user")[:12]
+        recommendations = build_resource_cta_recommendations(self.object, limit=8)
+        context["cta_recommendations"] = attach_recommendation_feedback(self.object, recommendations, user=self.request.user)
+        context["cta_recommendation_feedback"] = self.object.cta_recommendation_feedback.select_related("target_lesson", "applied_cta")[:10]
+        return context
+
+
+@require_POST
+@staff_required
+def apply_resource_cta_recommendation(request, slug):
+    resource = get_object_or_404(LearningResource, slug=slug)
+    recommendation_key = request.POST.get("recommendation_key", "").strip()
+    try:
+        cta = create_cta_from_recommendation(resource, recommendation_key, user=request.user)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, f"CTA recommendation applied: {cta.title}")
+    return redirect(resource)
+
+
+@require_POST
+@staff_required
+def dismiss_resource_cta_recommendation(request, slug):
+    resource = get_object_or_404(LearningResource, slug=slug)
+    recommendation_key = request.POST.get("recommendation_key", "").strip()
+    try:
+        feedback = mark_recommendation_dismissed(resource, recommendation_key, user=request.user)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, f"CTA recommendation dismissed: {feedback.title}")
+    return redirect(resource)
+
+
+class ResourceCTARecommendationFeedbackReportView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/resource_cta_recommendation_feedback.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        status = self.request.GET.get("status", "").strip()
+        target_type = self.request.GET.get("target_type", "").strip()
+        queryset = ResourceCTARecommendationFeedback.objects.select_related(
+            "resource", "target_lesson", "applied_cta", "updated_by"
+        )
+        if status:
+            queryset = queryset.filter(status=status)
+        if target_type:
+            queryset = queryset.filter(target_type=target_type)
+        context["feedback_rows"] = queryset[:200]
+        context["statuses"] = ResourceCTARecommendationFeedback.Status.choices
+        context["target_types"] = ResourceCTA.TargetType.choices
+        context["selected_status"] = status
+        context["selected_target_type"] = target_type
+        context["recommendation_tuning"] = RecommendationTuning.get_active()
+        context["summary"] = {
+            "shown": ResourceCTARecommendationFeedback.objects.filter(status=ResourceCTARecommendationFeedback.Status.SHOWN).count(),
+            "accepted": ResourceCTARecommendationFeedback.objects.filter(status=ResourceCTARecommendationFeedback.Status.ACCEPTED).count(),
+            "dismissed": ResourceCTARecommendationFeedback.objects.filter(status=ResourceCTARecommendationFeedback.Status.DISMISSED).count(),
+            "ignored": ResourceCTARecommendationFeedback.objects.filter(status=ResourceCTARecommendationFeedback.Status.SHOWN, times_shown__gt=1).count(),
+            "accepted_patterns": ResourceCTARecommendationFeedback.objects.filter(status=ResourceCTARecommendationFeedback.Status.ACCEPTED).values("target_type").distinct().count(),
+            "dismissed_patterns": ResourceCTARecommendationFeedback.objects.filter(status=ResourceCTARecommendationFeedback.Status.DISMISSED).values("target_type").distinct().count(),
+        }
+        return context
+
+
+class LearningResourcePDFPreviewView(StaffRequiredMixin, DetailView):
+    model = LearningResource
+
+    def get_queryset(self):
+        return LearningResource.objects.select_related("category").prefetch_related("related_lessons")
+
+    def get(self, request, *args, **kwargs):
+        resource = self.get_object()
+        pdf_bytes = render_learning_resource_pdf(
+            resource,
+            site_url=absolute_url(reverse("learn:home"), request=request),
+        )
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{resource_pdf_filename(resource)}"'
+        return response
+
+
+class ResourceIdeaGenerateView(StaffRequiredMixin, FormView):
+    template_name = "studio/resource_idea_form.html"
+    form_class = ResourceIdeaForm
+
+    def form_valid(self, form):
+        resource = create_resource_from_idea(
+            ResourceIdeaDraft(
+                topic=form.cleaned_data["topic"],
+                resource_type=form.cleaned_data["resource_type"],
+                audience=form.cleaned_data.get("audience") or "absolute beginners",
+                category=form.cleaned_data.get("category"),
+                related_lessons=list(form.cleaned_data.get("related_lessons") or []),
+                featured=form.cleaned_data.get("featured", False),
+                created_by=self.request.user,
+            )
+        )
+        messages.success(
+            self.request,
+            "Draft resource generated. Review the content, examples, SEO fields, links, downloads, and status before publishing.",
+        )
+        return redirect(resource)
+
+
+class LearningResourceCreateView(StaffRequiredMixin, CreateView):
+    model = LearningResource
+    form_class = LearningResourceForm
+    template_name = "studio/resource_form.html"
+
+    def form_valid(self, form):
+        form.instance.created_by = self.request.user
+        form.instance.updated_by = self.request.user
+        messages.success(self.request, "Resource created.")
+        return super().form_valid(form)
+
+
+class LearningResourceUpdateView(StaffRequiredMixin, UpdateView):
+    model = LearningResource
+    form_class = LearningResourceForm
+    template_name = "studio/resource_form.html"
+
+    def form_valid(self, form):
+        form.instance.updated_by = self.request.user
+        messages.success(self.request, "Resource updated.")
+        return super().form_valid(form)
+
+
+class LearningResourceDeleteView(StaffRequiredMixin, DeleteView):
+    model = LearningResource
+    template_name = "studio/resource_confirm_delete.html"
+    success_url = reverse_lazy("studio:resource-list")
+
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, "Resource deleted.")
+        return super().delete(request, *args, **kwargs)
+
+
+class ResourceCTACreateView(StaffRequiredMixin, CreateView):
+    model = ResourceCTA
+    form_class = ResourceCTAForm
+    template_name = "studio/resource_cta_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.resource = get_object_or_404(LearningResource, slug=kwargs["slug"])
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_initial(self):
+        initial = super().get_initial()
+        next_position = (self.resource.cta_blocks.aggregate(Max("position"))["position__max"] or 0) + 1
+        initial.setdefault("position", next_position)
+        target_type = self.request.GET.get("target_type")
+        valid_types = {choice[0] for choice in ResourceCTA.TargetType.choices}
+        if target_type in valid_types:
+            initial["target_type"] = target_type
+        return initial
+
+    def form_valid(self, form):
+        form.instance.resource = self.resource
+        messages.success(self.request, "Resource CTA block saved.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return self.resource.get_absolute_url()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["resource"] = self.resource
+        return context
+
+
+class ResourceCTAUpdateView(StaffRequiredMixin, UpdateView):
+    model = ResourceCTA
+    form_class = ResourceCTAForm
+    template_name = "studio/resource_cta_form.html"
+
+    def get_queryset(self):
+        return ResourceCTA.objects.select_related("resource", "target_lesson")
+
+    def form_valid(self, form):
+        messages.success(self.request, "Resource CTA block updated.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return self.object.resource.get_absolute_url()
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["resource"] = self.object.resource
+        return context
+
+
+class ResourceCTADeleteView(StaffRequiredMixin, DeleteView):
+    model = ResourceCTA
+    template_name = "studio/resource_cta_confirm_delete.html"
+
+    def get_queryset(self):
+        return ResourceCTA.objects.select_related("resource")
+
+    def get_success_url(self):
+        return self.object.resource.get_absolute_url()
+
+    def delete(self, request, *args, **kwargs):
+        messages.success(request, "Resource CTA block deleted.")
+        return super().delete(request, *args, **kwargs)
+
+
+class LessonListView(StaffRequiredMixin, ListView):
     model = Lesson
     template_name = "studio/lesson_list.html"
     context_object_name = "lessons"
@@ -138,7 +2751,33 @@ class LessonListView(LoginRequiredMixin, ListView):
         return queryset.distinct()
 
 
-class LessonCreateView(LoginRequiredMixin, CreateView):
+
+
+class LessonIdeaGenerateView(StaffRequiredMixin, FormView):
+    template_name = "studio/lesson_idea_form.html"
+    form_class = LessonIdeaForm
+
+    def form_valid(self, form):
+        lesson = create_lesson_from_idea(
+            LessonIdeaDraft(
+                topic=form.cleaned_data["topic"],
+                audience=form.cleaned_data.get("audience") or "absolute beginners",
+                objective=form.cleaned_data.get("objective") or "",
+                category=form.cleaned_data.get("category"),
+                series=form.cleaned_data.get("series"),
+                include_quiz=form.cleaned_data.get("include_quiz", True),
+                include_challenge=form.cleaned_data.get("include_challenge", True),
+                created_by=self.request.user,
+            )
+        )
+        messages.success(
+            self.request,
+            "Draft lesson generated. Review the details, code, output, quiz, challenge, and test case before publishing.",
+        )
+        return redirect(lesson)
+
+
+class LessonCreateView(StaffRequiredMixin, CreateView):
     model = Lesson
     form_class = LessonForm
     template_name = "studio/lesson_form.html"
@@ -150,7 +2789,7 @@ class LessonCreateView(LoginRequiredMixin, CreateView):
         return super().form_valid(form)
 
 
-class LessonUpdateView(LoginRequiredMixin, UpdateView):
+class LessonUpdateView(StaffRequiredMixin, UpdateView):
     model = Lesson
     form_class = LessonForm
     template_name = "studio/lesson_form.html"
@@ -161,7 +2800,94 @@ class LessonUpdateView(LoginRequiredMixin, UpdateView):
         return super().form_valid(form)
 
 
-class LessonDetailView(LoginRequiredMixin, DetailView):
+@staff_required
+def duplicate_lesson(request, slug):
+    source = get_object_or_404(Lesson.objects.prefetch_related("tags", "blocks", "quiz_questions__choices", "code_challenges__test_cases"), slug=slug)
+    if request.method != "POST":
+        return redirect(source)
+
+    copy = Lesson.objects.create(
+        title=f"Copy of {source.title}",
+        summary=source.summary,
+        status=Lesson.Status.DRAFT,
+        difficulty=source.difficulty,
+        category=source.category,
+        series=source.series,
+        series_position=None,
+        accent_color=source.accent_color,
+        call_to_action=source.call_to_action,
+        seo_title="",
+        seo_description="",
+        learning_objective=source.learning_objective,
+        beginner_takeaway=source.beginner_takeaway,
+        common_mistake=source.common_mistake,
+        practice_prompt=source.practice_prompt,
+        starter_code=source.starter_code,
+        solution_code=source.solution_code,
+        expected_output=source.expected_output,
+        hint_1=source.hint_1,
+        hint_2=source.hint_2,
+        next_lesson=source.next_lesson,
+        enable_playground=source.enable_playground,
+        internal_notes=f"Duplicated from {source.title}.\n\n{source.internal_notes}".strip(),
+        created_by=request.user,
+        updated_by=request.user,
+    )
+    copy.tags.set(source.tags.all())
+    for block in source.blocks.all():
+        LessonBlock.objects.create(
+            lesson=copy,
+            position=block.position,
+            block_type=block.block_type,
+            title=block.title,
+            content=block.content,
+            data=block.data,
+        )
+    for question in source.quiz_questions.all():
+        copied_question = QuizQuestion.objects.create(
+            lesson=copy,
+            position=question.position,
+            question_type=question.question_type,
+            prompt=question.prompt,
+            explanation=question.explanation,
+            is_active=question.is_active,
+        )
+        for choice in question.choices.all():
+            QuizChoice.objects.create(
+                question=copied_question,
+                position=choice.position,
+                text=choice.text,
+                is_correct=choice.is_correct,
+            )
+    for challenge in source.code_challenges.all():
+        copied_challenge = CodeChallenge.objects.create(
+            lesson=copy,
+            position=challenge.position,
+            title=challenge.title,
+            prompt=challenge.prompt,
+            starter_code=challenge.starter_code,
+            solution_code=challenge.solution_code,
+            expected_output=challenge.expected_output,
+            hint_1=challenge.hint_1,
+            hint_2=challenge.hint_2,
+            validation_mode=challenge.validation_mode,
+            is_active=challenge.is_active,
+        )
+        for test_case in challenge.test_cases.all():
+            ChallengeTestCase.objects.create(
+                challenge=copied_challenge,
+                position=test_case.position,
+                name=test_case.name,
+                description=test_case.description,
+                test_code=test_case.test_code,
+                expected_output=test_case.expected_output,
+                is_active=test_case.is_active,
+            )
+    messages.success(request, "Lesson duplicated as a new draft, including blocks, quizzes, and challenges.")
+    return redirect(copy)
+
+
+class LessonDetailView(StaffRequiredMixin, DetailView):
     model = Lesson
     template_name = "studio/lesson_detail.html"
 
@@ -172,13 +2898,31 @@ class LessonDetailView(LoginRequiredMixin, DetailView):
             "assets__template",
             "ai_generations",
             "website_exports",
+            "publishing_records__caption",
+            "publishing_records__graphic",
+            "content_plans__caption",
+            "content_plans__graphic",
+            "content_plans__publishing_record",
+            "quiz_questions__choices",
+            "code_challenges__test_cases",
         )
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["caption_form"] = CaptionGenerationForm()
         context["graphic_form"] = GraphicGenerationForm()
+        context["block_template_form"] = BlockTemplateApplyForm()
+        context["block_templates"] = BLOCK_TEMPLATES
+        context["social_carousel_form"] = SocialCarouselTemplateApplyForm()
+        context["social_carousel_templates"] = SOCIAL_CAROUSEL_TEMPLATES
         context["seo_diagnostics"] = seo_diagnostics(self.object)
+        context["quality_diagnostics"] = self.object.quality_diagnostics
+        context["platform_statuses"] = [
+            ("Facebook", self.object.facebook_status, self.object.get_facebook_status_display()),
+            ("Instagram", self.object.instagram_status, self.object.get_instagram_status_display()),
+            ("Threads", self.object.threads_status, self.object.get_threads_status_display()),
+            ("Website", self.object.website_status, self.object.get_website_status_display()),
+        ]
         context["lesson_workflow"] = [
             {
                 "label": "Details",
@@ -191,14 +2935,29 @@ class LessonDetailView(LoginRequiredMixin, DetailView):
                 "url": reverse("studio:block-create", args=[self.object.slug]),
             },
             {
-                "label": "Graphics",
-                "complete": self.object.assets.filter(status="ready").exists(),
-                "url": "#graphics",
+                "label": "Social",
+                "complete": self.object.blocks.filter(title__icontains="Slide 1").exists() or self.object.assets.filter(status="ready").exists(),
+                "url": "#social-carousels",
             },
             {
                 "label": "Captions",
                 "complete": self.object.captions.exists(),
                 "url": "#captions",
+            },
+            {
+                "label": "Planner",
+                "complete": self.object.content_plans.exists(),
+                "url": "#planner",
+            },
+            {
+                "label": "Publishing",
+                "complete": self.object.publishing_records.exists(),
+                "url": "#publishing",
+            },
+            {
+                "label": "Quiz/challenge",
+                "complete": self.object.quiz_questions.exists() or self.object.code_challenges.exists(),
+                "url": "#assessments",
             },
             {
                 "label": "Website",
@@ -209,7 +2968,65 @@ class LessonDetailView(LoginRequiredMixin, DetailView):
         return context
 
 
-class BlockCreateView(LoginRequiredMixin, CreateView):
+@staff_required
+def apply_block_template(request, slug):
+    lesson = get_object_or_404(Lesson, slug=slug)
+    if request.method != "POST":
+        return redirect(lesson)
+    form = BlockTemplateApplyForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Choose a valid block template.")
+        return redirect(lesson)
+    template = get_block_template(form.cleaned_data["template_key"])
+    if not template:
+        messages.error(request, "That block template is no longer available.")
+        return redirect(lesson)
+    created = apply_block_template_to_lesson(lesson, template)
+    summary = ", ".join(
+        f"{count} {label}"
+        for label, count in [
+            ("block(s)", created["blocks"]),
+            ("quiz question(s)", created["quizzes"]),
+            ("challenge(s)", created["challenges"]),
+            ("test case(s)", created["tests"]),
+        ]
+        if count
+    )
+    messages.success(request, f"Applied {template.name}. Added {summary or 'template content'}.")
+    return redirect(lesson.get_absolute_url() + "#block-templates")
+
+
+@staff_required
+def apply_social_carousel_template(request, slug):
+    lesson = get_object_or_404(Lesson, slug=slug)
+    if request.method != "POST":
+        return redirect(lesson)
+    form = SocialCarouselTemplateApplyForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Choose a valid social carousel template.")
+        return redirect(lesson.get_absolute_url() + "#social-carousels")
+    template = get_social_carousel_template(form.cleaned_data["template_key"])
+    if not template:
+        messages.error(request, "That social carousel template is no longer available.")
+        return redirect(lesson.get_absolute_url() + "#social-carousels")
+    try:
+        created = apply_social_carousel_template_to_lesson(
+            lesson,
+            template,
+            output_formats=form.cleaned_data.get("output_formats") or (),
+            generate_now=form.cleaned_data.get("generate_now", False),
+        )
+    except GraphicGenerationError as exc:
+        messages.error(request, f"Applied carousel blocks, but graphic generation failed: {exc}")
+        return redirect(lesson.get_absolute_url() + "#social-carousels")
+    message = f"Applied {template.name}. Added {created['blocks']} carousel-ready block(s)."
+    if created.get("assets"):
+        message += f" Generated {created['assets']} graphic asset(s)."
+    messages.success(request, message)
+    return redirect(lesson.get_absolute_url() + "#social-carousels")
+
+
+class BlockCreateView(StaffRequiredMixin, CreateView):
     model = LessonBlock
     form_class = LessonBlockForm
     template_name = "studio/block_form.html"
@@ -235,7 +3052,7 @@ class BlockCreateView(LoginRequiredMixin, CreateView):
         return context
 
 
-class BlockUpdateView(LoginRequiredMixin, UpdateView):
+class BlockUpdateView(StaffRequiredMixin, UpdateView):
     model = LessonBlock
     form_class = LessonBlockForm
     template_name = "studio/block_form.html"
@@ -250,7 +3067,28 @@ class BlockUpdateView(LoginRequiredMixin, UpdateView):
         return context
 
 
-class BlockDeleteView(LoginRequiredMixin, DeleteView):
+@staff_required
+def duplicate_block(request, pk):
+    source = get_object_or_404(LessonBlock, pk=pk)
+    if request.method != "POST":
+        return redirect(source.lesson)
+
+    new_position = (
+        source.lesson.blocks.aggregate(maximum=Max("position"))["maximum"] or 0
+    ) + 1
+    LessonBlock.objects.create(
+        lesson=source.lesson,
+        position=new_position,
+        block_type=source.block_type,
+        title=source.title,
+        content=source.content,
+        data=source.data,
+    )
+    messages.success(request, "Content block duplicated at the end of the lesson.")
+    return redirect(source.lesson)
+
+
+class BlockDeleteView(StaffRequiredMixin, DeleteView):
     model = LessonBlock
     template_name = "studio/block_confirm_delete.html"
 
@@ -258,7 +3096,342 @@ class BlockDeleteView(LoginRequiredMixin, DeleteView):
         return self.object.lesson.get_absolute_url()
 
 
-class CaptionUpdateView(LoginRequiredMixin, UpdateView):
+class QuizQuestionCreateView(StaffRequiredMixin, CreateView):
+    model = QuizQuestion
+    form_class = QuizQuestionForm
+    template_name = "studio/assessment_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.lesson = get_object_or_404(Lesson, slug=kwargs["slug"])
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_initial(self):
+        initial = super().get_initial()
+        initial["position"] = (self.lesson.quiz_questions.aggregate(maximum=Max("position"))["maximum"] or 0) + 1
+        return initial
+
+    def form_valid(self, form):
+        form.instance.lesson = self.lesson
+        if not form.instance.position:
+            form.instance.position = (
+                self.lesson.quiz_questions.aggregate(maximum=Max("position"))["maximum"] or 0
+            ) + 1
+        messages.success(self.request, "Quiz question saved. Add answer choices next.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return self.lesson.get_absolute_url() + "#assessments"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.lesson
+        context["form_title"] = "Add quiz question"
+        return context
+
+
+class QuizQuestionUpdateView(StaffRequiredMixin, UpdateView):
+    model = QuizQuestion
+    form_class = QuizQuestionForm
+    template_name = "studio/assessment_form.html"
+
+    def get_success_url(self):
+        messages.success(self.request, "Quiz question updated.")
+        return self.object.lesson.get_absolute_url() + "#assessments"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.object.lesson
+        context["form_title"] = "Edit quiz question"
+        return context
+
+
+class QuizQuestionDeleteView(StaffRequiredMixin, DeleteView):
+    model = QuizQuestion
+    template_name = "studio/assessment_confirm_delete.html"
+
+    def get_success_url(self):
+        return self.object.lesson.get_absolute_url() + "#assessments"
+
+
+class QuizChoiceCreateView(StaffRequiredMixin, CreateView):
+    model = QuizChoice
+    form_class = QuizChoiceForm
+    template_name = "studio/assessment_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.question = get_object_or_404(QuizQuestion.objects.select_related("lesson"), pk=kwargs["question_pk"])
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_initial(self):
+        initial = super().get_initial()
+        initial["position"] = (self.question.choices.aggregate(maximum=Max("position"))["maximum"] or 0) + 1
+        return initial
+
+    def form_valid(self, form):
+        form.instance.question = self.question
+        if not form.instance.position:
+            form.instance.position = (
+                self.question.choices.aggregate(maximum=Max("position"))["maximum"] or 0
+            ) + 1
+        messages.success(self.request, "Answer choice saved.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return self.question.lesson.get_absolute_url() + "#assessments"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.question.lesson
+        context["form_title"] = "Add quiz answer choice"
+        return context
+
+
+class QuizChoiceUpdateView(StaffRequiredMixin, UpdateView):
+    model = QuizChoice
+    form_class = QuizChoiceForm
+    template_name = "studio/assessment_form.html"
+
+    def get_success_url(self):
+        messages.success(self.request, "Answer choice updated.")
+        return self.object.question.lesson.get_absolute_url() + "#assessments"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.object.question.lesson
+        context["form_title"] = "Edit quiz answer choice"
+        return context
+
+
+class QuizChoiceDeleteView(StaffRequiredMixin, DeleteView):
+    model = QuizChoice
+    template_name = "studio/assessment_confirm_delete.html"
+
+    def get_success_url(self):
+        return self.object.question.lesson.get_absolute_url() + "#assessments"
+
+
+class CodeChallengeCreateView(StaffRequiredMixin, CreateView):
+    model = CodeChallenge
+    form_class = CodeChallengeForm
+    template_name = "studio/assessment_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.lesson = get_object_or_404(Lesson, slug=kwargs["slug"])
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_initial(self):
+        initial = super().get_initial()
+        initial["position"] = (self.lesson.code_challenges.aggregate(maximum=Max("position"))["maximum"] or 0) + 1
+        return initial
+
+    def form_valid(self, form):
+        form.instance.lesson = self.lesson
+        if not form.instance.position:
+            form.instance.position = (
+                self.lesson.code_challenges.aggregate(maximum=Max("position"))["maximum"] or 0
+            ) + 1
+        messages.success(self.request, "Code challenge saved.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return self.lesson.get_absolute_url() + "#assessments"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.lesson
+        context["form_title"] = "Add code challenge"
+        return context
+
+
+class CodeChallengeUpdateView(StaffRequiredMixin, UpdateView):
+    model = CodeChallenge
+    form_class = CodeChallengeForm
+    template_name = "studio/assessment_form.html"
+
+    def get_success_url(self):
+        messages.success(self.request, "Code challenge updated.")
+        return self.object.lesson.get_absolute_url() + "#assessments"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.object.lesson
+        context["form_title"] = "Edit code challenge"
+        return context
+
+
+class CodeChallengeDeleteView(StaffRequiredMixin, DeleteView):
+    model = CodeChallenge
+    template_name = "studio/assessment_confirm_delete.html"
+
+    def get_success_url(self):
+        return self.object.lesson.get_absolute_url() + "#assessments"
+
+
+class ChallengeTestCaseCreateView(StaffRequiredMixin, CreateView):
+    model = ChallengeTestCase
+    form_class = ChallengeTestCaseForm
+    template_name = "studio/assessment_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.challenge = get_object_or_404(CodeChallenge.objects.select_related("lesson"), pk=kwargs["challenge_pk"])
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_initial(self):
+        initial = super().get_initial()
+        initial["position"] = (self.challenge.test_cases.aggregate(maximum=Max("position"))["maximum"] or 0) + 1
+        return initial
+
+    def form_valid(self, form):
+        form.instance.challenge = self.challenge
+        if not form.instance.position:
+            form.instance.position = (
+                self.challenge.test_cases.aggregate(maximum=Max("position"))["maximum"] or 0
+            ) + 1
+        messages.success(self.request, "Challenge test case saved.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return self.challenge.lesson.get_absolute_url() + "#assessments"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.challenge.lesson
+        context["form_title"] = "Add challenge test case"
+        return context
+
+
+class ChallengeTestCaseUpdateView(StaffRequiredMixin, UpdateView):
+    model = ChallengeTestCase
+    form_class = ChallengeTestCaseForm
+    template_name = "studio/assessment_form.html"
+
+    def get_success_url(self):
+        messages.success(self.request, "Challenge test case updated.")
+        return self.object.challenge.lesson.get_absolute_url() + "#assessments"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.object.challenge.lesson
+        context["form_title"] = "Edit challenge test case"
+        return context
+
+
+class ChallengeTestCaseDeleteView(StaffRequiredMixin, DeleteView):
+    model = ChallengeTestCase
+    template_name = "studio/assessment_confirm_delete.html"
+
+    def get_success_url(self):
+        return self.object.challenge.lesson.get_absolute_url() + "#assessments"
+
+
+class PublishingRecordCreateView(StaffRequiredMixin, CreateView):
+    model = PublishingRecord
+    form_class = PublishingRecordForm
+    template_name = "studio/publishing_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.lesson = get_object_or_404(Lesson, slug=kwargs["slug"])
+        self.content_plan = None
+        plan_id = request.GET.get("plan") or request.POST.get("plan")
+        if plan_id:
+            self.content_plan = get_object_or_404(ContentPlan, pk=plan_id, lesson=self.lesson)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["lesson"] = self.lesson
+        return kwargs
+
+    def form_valid(self, form):
+        form.instance.lesson = self.lesson
+        form.instance.created_by = self.request.user
+        response = super().form_valid(form)
+        _sync_platform_status_from_publishing_record(form.instance)
+        if self.content_plan:
+            self.content_plan.mark_posted(form.instance)
+        messages.success(self.request, "Publishing record saved and platform status updated.")
+        return response
+
+    def get_initial(self):
+        initial = super().get_initial()
+        platform = self.request.GET.get("platform")
+        valid_platforms = {choice[0] for choice in PublishingRecord.Platform.choices}
+        if platform in valid_platforms:
+            initial["platform"] = platform
+        caption_id = self.request.GET.get("caption")
+        if caption_id:
+            initial["caption"] = caption_id
+        graphic_id = self.request.GET.get("graphic")
+        if graphic_id:
+            initial["graphic"] = graphic_id
+        if self.content_plan:
+            initial.setdefault("platform", self.content_plan.platform)
+            initial.setdefault("published_at", self.content_plan.scheduled_at)
+            if self.content_plan.caption_id:
+                initial.setdefault("caption", self.content_plan.caption_id)
+            if self.content_plan.graphic_id:
+                initial.setdefault("graphic", self.content_plan.graphic_id)
+        return initial
+
+    def get_success_url(self):
+        return self.lesson.get_absolute_url() + "#publishing"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.lesson
+        context["form_title"] = "Add publishing record"
+        context["content_plan"] = self.content_plan
+        return context
+
+
+class PublishingRecordUpdateView(StaffRequiredMixin, UpdateView):
+    model = PublishingRecord
+    form_class = PublishingRecordForm
+    template_name = "studio/publishing_form.html"
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["lesson"] = self.object.lesson
+        return kwargs
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        _sync_platform_status_from_publishing_record(form.instance)
+        messages.success(self.request, "Publishing record updated.")
+        return response
+
+    def get_success_url(self):
+        return self.object.lesson.get_absolute_url() + "#publishing"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["lesson"] = self.object.lesson
+        context["form_title"] = "Edit publishing record"
+        return context
+
+
+class PublishingRecordDeleteView(StaffRequiredMixin, DeleteView):
+    model = PublishingRecord
+    template_name = "studio/publishing_confirm_delete.html"
+
+    def get_success_url(self):
+        return self.object.lesson.get_absolute_url() + "#publishing"
+
+
+def _sync_platform_status_from_publishing_record(record):
+    field_by_platform = {
+        PublishingRecord.Platform.FACEBOOK: "facebook_status",
+        PublishingRecord.Platform.INSTAGRAM: "instagram_status",
+        PublishingRecord.Platform.THREADS: "threads_status",
+        PublishingRecord.Platform.WEBSITE: "website_status",
+    }
+    field_name = field_by_platform.get(record.platform)
+    if not field_name:
+        return
+    Lesson.objects.filter(pk=record.lesson_id).update(**{field_name: Lesson.Status.PUBLISHED})
+
+
+class CaptionUpdateView(StaffRequiredMixin, UpdateView):
     model = CaptionDraft
     form_class = CaptionDraftForm
     template_name = "studio/caption_form.html"
@@ -271,7 +3444,7 @@ class CaptionUpdateView(LoginRequiredMixin, UpdateView):
         return self.object.lesson.get_absolute_url()
 
 
-class BrandProfileUpdateView(LoginRequiredMixin, UpdateView):
+class BrandProfileUpdateView(StaffRequiredMixin, UpdateView):
     model = BrandProfile
     form_class = BrandProfileForm
     template_name = "studio/brand_form.html"
@@ -285,7 +3458,7 @@ class BrandProfileUpdateView(LoginRequiredMixin, UpdateView):
         return super().form_valid(form)
 
 
-@login_required
+@staff_required
 def move_block(request, pk, direction):
     block = get_object_or_404(LessonBlock, pk=pk)
     if request.method != "POST" or direction not in {"up", "down"}:
@@ -310,7 +3483,7 @@ def move_block(request, pk, direction):
     return redirect(block.lesson)
 
 
-@login_required
+@staff_required
 def generate_captions(request, slug):
     lesson = get_object_or_404(Lesson, slug=slug)
     if request.method != "POST":
@@ -331,7 +3504,7 @@ def generate_captions(request, slug):
     return redirect(lesson)
 
 
-@login_required
+@staff_required
 def generate_graphic_assets(request, slug):
     lesson = get_object_or_404(Lesson, slug=slug)
     if request.method != "POST":
@@ -352,7 +3525,7 @@ def generate_graphic_assets(request, slug):
     return redirect(lesson)
 
 
-@login_required
+@staff_required
 def website_preview(request, slug):
     lesson = get_object_or_404(
         Lesson.objects.select_related("category", "series").prefetch_related(
@@ -364,7 +3537,7 @@ def website_preview(request, slug):
     return HttpResponse(html)
 
 
-@login_required
+@staff_required
 def create_website_export_view(request, slug):
     lesson = get_object_or_404(
         Lesson.objects.select_related("category", "series").prefetch_related(
@@ -379,7 +3552,7 @@ def create_website_export_view(request, slug):
     return redirect(lesson)
 
 
-@login_required
+@staff_required
 def download_website_export(request, pk, output_format):
     export = get_object_or_404(WebsiteExport.objects.select_related("lesson"), pk=pk)
     if output_format == "json":

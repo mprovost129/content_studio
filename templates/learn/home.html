@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Learn Python{% endblock %}
+{% block meta_description %}Beginner-friendly Python lessons, runnable examples, quizzes, and practice challenges from Code with Michael.{% endblock %}
+{% block extra_meta %}
+<meta property="og:type" content="website">
+<meta property="og:title" content="Learn Python with Code with Michael">
+<meta property="og:description" content="Beginner-friendly Python lessons, runnable examples, quizzes, and practice challenges.">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta name="twitter:card" content="summary">
+{% endblock %}
+{% block content %}
+<section class="learn-hero panel">
+    <span class="eyebrow">BEGINNER PYTHON</span>
+    <h1>Learn Python one small win at a time.</h1>
+    <p>Short lessons, runnable examples, beginner mistakes explained plainly, and practice prompts designed for people starting from zero.</p>
+    <div class="heading-actions"><a class="btn btn-primary" href="{% url 'learn:lesson-list' %}">Start learning</a><a class="btn btn-secondary" href="{% url 'learn:playground' %}">Open playground</a></div>
+</section>
+{% include "includes/newsletter_signup.html" %}
+<div class="learn-grid">
+    <section class="panel output-section"><div class="panel-heading"><div><span class="eyebrow">PATHS</span><h2>Learning paths</h2></div></div><div class="learn-card-grid">
+        {% for series in series_list %}<a class="learn-card" href="{% url 'learn:series-detail' series.slug %}"><strong>{{ series.title }}</strong><p>{{ series.description|default:"Follow this ordered set of lessons." }}</p><small>{{ series.published_lessons }} lesson{{ series.published_lessons|pluralize }}</small></a>{% empty %}<div class="empty-state">No public paths yet. Mark lessons as Website Ready or Published.</div>{% endfor %}
+    </div></section>
+    <section class="panel output-section"><div class="panel-heading"><div><span class="eyebrow">LATEST</span><h2>Beginner lessons</h2></div><a href="{% url 'learn:lesson-list' %}">View all</a></div><div class="lesson-list">
+        {% for lesson in lessons %}<a class="lesson-row" href="{% url 'learn:lesson-detail' lesson.slug %}"><span class="color-dot" style="--dot: {{ lesson.resolved_accent_color }}"></span><span class="lesson-row__main"><strong>{{ lesson.title }}</strong><small>{{ lesson.summary|truncatechars:120 }}</small></span></a>{% empty %}<div class="empty-state">No public lessons yet.</div>{% endfor %}
+    </div></section>
+
+    <section class="panel output-section"><div class="panel-heading"><div><span class="eyebrow">REFERENCES</span><h2>Beginner resources</h2></div><a href="{% url 'learn:resource-list' %}">View all</a></div><div class="learn-card-grid">
+        {% for resource in featured_resources %}<a class="learn-card" href="{% url 'learn:resource-detail' resource.slug %}"><small>{{ resource.get_resource_type_display }}</small><strong>{{ resource.title }}</strong><p>{{ resource.summary|truncatechars:130 }}</p></a>{% empty %}<div class="empty-state">No featured resources yet.</div>{% endfor %}
+    </div></section>
+</div>
+{% endblock %}

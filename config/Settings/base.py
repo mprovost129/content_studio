@@ -98,7 +98,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Auth
 LOGIN_URL = 'login'
-LOGIN_REDIRECT_URL = '/studio/'
+LOGIN_REDIRECT_URL = '/learn/dashboard/'
 LOGOUT_REDIRECT_URL = '/'
 
 # OpenAI Responses API. The API key is read by the OpenAI SDK from

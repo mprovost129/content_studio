@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-heading lesson-heading">
     <div><span class="eyebrow">{{ lesson.get_difficulty_display }}{% if lesson.series %} · {{ lesson.series }}{% endif %}</span><h1>{{ lesson.title }}</h1><p>{{ lesson.summary|default:"Add a summary to guide captions and graphics." }}</p></div>
-    <div class="heading-actions"><span class="status status--{{ lesson.status }}">{{ lesson.get_status_display }}</span>{% if lesson.enable_playground %}<span class="status status--playground"><i class="bi bi-play-fill"></i> Playground</span>{% endif %}<a class="btn btn-secondary" href="{% url 'studio:website-preview' lesson.slug %}" target="_blank" rel="noopener"><i class="bi bi-window"></i> Website preview</a><a class="btn btn-secondary" href="{% url 'studio:lesson-update' lesson.slug %}"><i class="bi bi-pencil"></i> Edit details</a></div>
+    <div class="heading-actions"><span class="status status--{{ lesson.status }}">{{ lesson.get_status_display }}</span>{% if lesson.enable_playground %}<span class="status status--playground"><i class="bi bi-play-fill"></i> Playground</span>{% endif %}<a class="btn btn-secondary" href="{% url 'studio:website-preview' lesson.slug %}" target="_blank" rel="noopener"><i class="bi bi-window"></i> Website preview</a><a class="btn btn-secondary" href="{% url 'studio:lesson-update' lesson.slug %}"><i class="bi bi-pencil"></i> Edit details</a><form method="post" action="{% url 'studio:lesson-duplicate' lesson.slug %}">{% csrf_token %}<button class="btn btn-secondary" type="submit"><i class="bi bi-files"></i> Duplicate</button></form></div>
 </div>
 
 <nav class="lesson-workflow panel" aria-label="Lesson workflow">
@@ -14,11 +14,11 @@
 
 <div class="detail-grid">
     <section class="panel">
-        <div class="panel-heading"><div><span class="eyebrow">SOURCE</span><h2>Content blocks</h2></div><a class="btn btn-sm btn-primary" href="{% url 'studio:block-create' lesson.slug %}"><i class="bi bi-plus-lg"></i> Add block</a></div>
+        <div class="panel-heading"><div><span class="eyebrow">SOURCE</span><h2>Content blocks</h2></div><div class="heading-actions"><a class="btn btn-sm btn-secondary" href="#block-templates"><i class="bi bi-layers"></i> Templates</a><a class="btn btn-sm btn-primary" href="{% url 'studio:block-create' lesson.slug %}"><i class="bi bi-plus-lg"></i> Add block</a></div></div>
         <div class="block-list">
             {% for block in lesson.blocks.all %}
             <article class="content-block content-block--{{ block.block_type }}">
-                <div class="content-block__heading"><span><b>{{ block.position }}</b>{{ block.get_block_type_display }}</span><span class="block-actions"><form method="post" action="{% url 'studio:block-move' block.pk 'up' %}">{% csrf_token %}<button class="link-button" type="submit" title="Move up">&uarr;</button></form><form method="post" action="{% url 'studio:block-move' block.pk 'down' %}">{% csrf_token %}<button class="link-button" type="submit" title="Move down">&darr;</button></form><a href="{% url 'studio:block-update' block.pk %}">Edit</a><a class="text-danger" href="{% url 'studio:block-delete' block.pk %}">Delete</a></span></div>
+                <div class="content-block__heading"><span><b>{{ block.position }}</b>{{ block.get_block_type_display }}</span><span class="block-actions"><form method="post" action="{% url 'studio:block-move' block.pk 'up' %}">{% csrf_token %}<button class="link-button" type="submit" title="Move up">&uarr;</button></form><form method="post" action="{% url 'studio:block-move' block.pk 'down' %}">{% csrf_token %}<button class="link-button" type="submit" title="Move down">&darr;</button></form><a href="{% url 'studio:block-update' block.pk %}">Edit</a><form method="post" action="{% url 'studio:block-duplicate' block.pk %}">{% csrf_token %}<button class="link-button" type="submit">Duplicate</button></form><a class="text-danger" href="{% url 'studio:block-delete' block.pk %}">Delete</a></span></div>
                 {% if block.title %}<h3>{{ block.title }}</h3>{% endif %}
                 {% if block.block_type == 'code' or block.block_type == 'output' %}<pre><code>{{ block.content }}</code></pre>{% else %}<div class="block-copy">{{ block.content|linebreaks }}</div>{% endif %}
             </article>
@@ -27,6 +27,66 @@
     </section>
 
     <aside class="detail-sidebar">
+
+        <section class="panel action-panel" id="social-carousels">
+            <span class="eyebrow">SOCIAL CAROUSELS</span><h2>Brand-growth templates</h2>
+            <p>Append a carousel-ready structure for Facebook, Instagram, and Threads. Generate PNGs now or review the blocks first.</p>
+            <form method="post" action="{% url 'studio:social-carousel-apply' lesson.slug %}">
+                {% csrf_token %}
+                {{ social_carousel_form.as_p }}
+                <button class="btn btn-primary w-100" type="submit"><i class="bi bi-layout-text-window-reverse"></i> Apply carousel template</button>
+            </form>
+            <details class="code-detail mt-3"><summary>Carousel formats</summary>
+                <ul class="template-summary-list">
+                {% for template in social_carousel_templates %}
+                    <li><strong>{{ template.name }}</strong><br><small>{{ template.description }}</small></li>
+                {% endfor %}
+                </ul>
+            </details>
+        </section>
+
+        <section class="panel action-panel" id="block-templates">
+            <span class="eyebrow">BLOCK TEMPLATES</span><h2>Build faster</h2>
+            <p>Append a reusable beginner lesson format such as Beginner Concept, Spot the Bug, Try It Yourself, or Mini Project.</p>
+            <form method="post" action="{% url 'studio:block-template-apply' lesson.slug %}">
+                {% csrf_token %}
+                {{ block_template_form.as_p }}
+                <button class="btn btn-primary w-100" type="submit"><i class="bi bi-layers"></i> Apply template</button>
+            </form>
+            <details class="code-detail mt-3"><summary>What each template adds</summary>
+                <ul class="template-summary-list">
+                {% for template in block_templates %}
+                    <li><strong>{{ template.name }}</strong><br><small>{{ template.description }}</small></li>
+                {% endfor %}
+                </ul>
+            </details>
+        </section>
+        <section class="panel action-panel">
+            <span class="eyebrow">LESSON QUALITY</span><h2>Beginner readiness</h2>
+            <div class="seo-score"><strong>{{ quality_diagnostics.score }}</strong><span>/100</span></div>
+            <p>{{ quality_diagnostics.complete }} of {{ quality_diagnostics.total }} beginner-teaching checks complete.</p>
+            <ul class="diagnostic-list quality-list">{% for check in quality_diagnostics.checks %}<li class="diagnostic {% if check.complete %}diagnostic--ready{% else %}diagnostic--warning{% endif %}">{{ check.label }}</li>{% endfor %}</ul>
+        </section>
+        <section class="panel action-panel">
+            <span class="eyebrow">PLATFORMS</span><h2>Publishing status</h2>
+            <div class="platform-status-grid">{% for name, raw_status, label in platform_statuses %}<div><span>{{ name }}</span><strong class="status status--{{ raw_status }}">{{ label }}</strong></div>{% endfor %}</div>
+            <p>Use Edit details to move each platform separately through idea, draft, review, ready, published, or archived.</p>
+        </section>
+        <section class="panel action-panel">
+            <span class="eyebrow">BEGINNER LESSON FIELDS</span><h2>Teaching notes</h2>
+            <dl class="lesson-meta-list">
+                {% if lesson.learning_objective %}<div><dt>Objective</dt><dd>{{ lesson.learning_objective }}</dd></div>{% endif %}
+                {% if lesson.beginner_takeaway %}<div><dt>Takeaway</dt><dd>{{ lesson.beginner_takeaway }}</dd></div>{% endif %}
+                {% if lesson.common_mistake %}<div><dt>Common mistake</dt><dd>{{ lesson.common_mistake|linebreaksbr }}</dd></div>{% endif %}
+                {% if lesson.practice_prompt %}<div><dt>Practice</dt><dd>{{ lesson.practice_prompt|linebreaksbr }}</dd></div>{% endif %}
+                {% if lesson.hint_1 or lesson.hint_2 %}<div><dt>Hints</dt><dd>{% if lesson.hint_1 %}1. {{ lesson.hint_1 }}{% endif %}{% if lesson.hint_2 %}<br>2. {{ lesson.hint_2 }}{% endif %}</dd></div>{% endif %}
+                {% if lesson.next_lesson %}<div><dt>Next lesson</dt><dd><a href="{{ lesson.next_lesson.get_absolute_url }}">{{ lesson.next_lesson.title }}</a></dd></div>{% endif %}
+            </dl>
+            {% if lesson.starter_code %}<details class="code-detail"><summary>Starter code</summary><pre><code>{{ lesson.starter_code }}</code></pre></details>{% endif %}
+            {% if lesson.solution_code %}<details class="code-detail"><summary>Solution code</summary><pre><code>{{ lesson.solution_code }}</code></pre></details>{% endif %}
+            {% if lesson.expected_output %}<details class="code-detail"><summary>Expected output</summary><pre><code>{{ lesson.expected_output }}</code></pre></details>{% endif %}
+            {% if not lesson.learning_objective and not lesson.beginner_takeaway and not lesson.practice_prompt and not lesson.starter_code %}<p>Add structured beginner fields on the lesson edit screen to make this easier to turn into a course, quiz, carousel, and playground challenge.</p>{% endif %}
+        </section>
         <section class="panel action-panel" id="website">
             <span class="eyebrow">WEBSITE + SEO</span><h2>Page readiness</h2>
             <div class="seo-score"><strong>{{ seo_diagnostics.score }}</strong><span>/100</span></div>
@@ -42,8 +102,123 @@
             <span class="eyebrow">OPENAI</span><h2>Draft captions</h2><p>Every request, response, token count, and estimated cost is recorded.</p>
             <form method="post" action="{% url 'studio:caption-generate' lesson.slug %}">{% csrf_token %}{{ caption_form.as_p }}<button class="btn btn-primary w-100" type="submit"><i class="bi bi-stars"></i> Generate caption drafts</button></form>
         </section>
+        <section class="panel action-panel">
+            <span class="eyebrow">PLANNER</span><h2>Schedule this lesson</h2><p>Choose a platform, caption, graphic, and planned publish date before the post goes live.</p>
+            <a class="btn btn-secondary w-100" href="{% url 'studio:content-plan-create' lesson.slug %}"><i class="bi bi-calendar-plus"></i> Plan post</a>
+            <a class="btn btn-secondary w-100" href="{% url 'studio:newsletter-campaign-create-for-lesson' lesson.slug %}"><i class="bi bi-envelope-paper"></i> Draft newsletter</a>
+        </section>
+        <section class="panel action-panel">
+            <span class="eyebrow">PUBLISHING</span><h2>Record a post</h2><p>After posting, save the platform, URL, caption, graphic, and performance metrics.</p>
+            <a class="btn btn-primary w-100" href="{% url 'studio:publishing-create' lesson.slug %}"><i class="bi bi-send-check"></i> Add publishing record</a>
+        </section>
     </aside>
 </div>
+
+
+<section class="panel output-section" id="assessments">
+    <div class="panel-heading">
+        <div><span class="eyebrow">PRACTICE</span><h2>Structured quizzes & challenges</h2></div>
+        <div class="heading-actions">
+            <a class="btn btn-sm btn-secondary" href="{% url 'studio:quiz-create' lesson.slug %}"><i class="bi bi-question-circle"></i> Add quiz</a>
+            <a class="btn btn-sm btn-primary" href="{% url 'studio:challenge-create' lesson.slug %}"><i class="bi bi-terminal"></i> Add challenge</a>
+        </div>
+    </div>
+    <div class="assessment-grid">
+        <div class="assessment-column">
+            <h3>Quiz questions</h3>
+            {% for question in lesson.quiz_questions.all %}
+            <article class="assessment-card">
+                <div class="content-block__heading"><span><b>{{ question.position }}</b>{{ question.get_question_type_display }}</span><span class="block-actions"><a href="{% url 'studio:quiz-update' question.pk %}">Edit</a><a href="{% url 'studio:quiz-choice-create' question.pk %}">Add choice</a><a class="text-danger" href="{% url 'studio:quiz-delete' question.pk %}">Delete</a></span></div>
+                <p>{{ question.prompt|linebreaksbr }}</p>
+                {% if question.choices.all %}<ol class="choice-list">{% for choice in question.choices.all %}<li class="{% if choice.is_correct %}is-correct{% endif %}">{{ choice.text }}{% if choice.is_correct %} <span>correct</span>{% endif %} <small><a href="{% url 'studio:quiz-choice-update' choice.pk %}">edit</a> · <a class="text-danger" href="{% url 'studio:quiz-choice-delete' choice.pk %}">delete</a></small></li>{% endfor %}</ol>{% else %}<p class="empty-mini">Add answer choices for multiple-choice questions.</p>{% endif %}
+                {% if question.explanation %}<details class="code-detail"><summary>Explanation</summary><p>{{ question.explanation|linebreaksbr }}</p></details>{% endif %}
+            </article>
+            {% empty %}<div class="empty-state">No structured quiz questions yet.</div>{% endfor %}
+        </div>
+        <div class="assessment-column">
+            <h3>Code challenges</h3>
+            {% for challenge in lesson.code_challenges.all %}
+            <article class="assessment-card">
+                <div class="content-block__heading"><span><b>{{ challenge.position }}</b>{{ challenge.title }}</span><span class="block-actions"><a href="{% url 'studio:challenge-update' challenge.pk %}">Edit</a><a href="{% url 'studio:challenge-test-create' challenge.pk %}">Add test</a><a class="text-danger" href="{% url 'studio:challenge-delete' challenge.pk %}">Delete</a></span></div>
+                <p>{{ challenge.prompt|linebreaksbr }}</p>
+                <small>{{ challenge.get_validation_mode_display }}</small>
+                {% if challenge.starter_code %}<details class="code-detail"><summary>Starter code</summary><pre><code>{{ challenge.starter_code }}</code></pre></details>{% endif %}
+                {% if challenge.solution_code %}<details class="code-detail"><summary>Solution</summary><pre><code>{{ challenge.solution_code }}</code></pre></details>{% endif %}
+                {% if challenge.expected_output %}<details class="code-detail"><summary>Expected output</summary><pre><code>{{ challenge.expected_output }}</code></pre></details>{% endif %}
+                {% if challenge.test_cases.all %}
+                <details class="code-detail"><summary>Test cases</summary>
+                    <ol class="choice-list">
+                    {% for test_case in challenge.test_cases.all %}
+                        <li class="{% if test_case.is_active %}is-correct{% endif %}"><strong>{{ test_case.position }}. {{ test_case.name|default:"Test case" }}</strong>{% if test_case.description %}<br>{{ test_case.description|linebreaksbr }}{% endif %}<br><small><a href="{% url 'studio:challenge-test-update' test_case.pk %}">edit</a> · <a class="text-danger" href="{% url 'studio:challenge-test-delete' test_case.pk %}">delete</a></small><pre><code>{{ test_case.test_code }}</code></pre>{% if test_case.expected_output %}<small>Expected:</small><pre><code>{{ test_case.expected_output }}</code></pre>{% endif %}</li>
+                    {% endfor %}
+                    </ol>
+                </details>
+                {% else %}<p class="empty-mini">Add test cases to validate function return values and printed output.</p>{% endif %}
+            </article>
+            {% empty %}<div class="empty-state">No structured code challenges yet.</div>{% endfor %}
+        </div>
+    </div>
+</section>
+
+<section class="panel output-section" id="planner">
+    <div class="panel-heading">
+        <div><span class="eyebrow">PLANNER</span><h2>Planned posts</h2></div>
+        <a class="btn btn-sm btn-primary" href="{% url 'studio:content-plan-create' lesson.slug %}"><i class="bi bi-calendar-plus"></i> Plan post</a>
+    </div>
+    <div class="export-list">
+        {% for plan in lesson.content_plans.all %}
+        <article>
+            <div>
+                <strong>{{ plan.get_platform_display }} · {{ plan.scheduled_at|date:"M j, Y g:i A" }}</strong>
+                <small>{{ plan.get_status_display }}{% if plan.carousel_template %} · {{ plan.carousel_template }}{% endif %}{% if plan.post_goal %} · {{ plan.post_goal }}{% endif %}</small>
+            </div>
+            <span class="block-actions"><a href="{% url 'studio:content-plan-update' plan.pk %}">Edit</a><a href="{% url 'studio:publishing-create' lesson.slug %}?platform={{ plan.platform }}{% if plan.caption_id %}&caption={{ plan.caption_id }}{% endif %}{% if plan.graphic_id %}&graphic={{ plan.graphic_id }}{% endif %}&plan={{ plan.pk }}">Record post</a><a class="text-danger" href="{% url 'studio:content-plan-delete' plan.pk %}">Delete</a></span>
+        </article>
+        {% empty %}<div class="empty-state">No planned posts yet. Use this to schedule your Facebook, Instagram, Threads, website, or email content before publishing.</div>{% endfor %}
+    </div>
+</section>
+
+
+<section class="panel output-section" id="newsletter-campaigns">
+    <div class="panel-heading">
+        <div><span class="eyebrow">EMAIL</span><h2>Newsletter campaigns</h2></div>
+        <a class="btn btn-sm btn-primary" href="{% url 'studio:newsletter-campaign-create-for-lesson' lesson.slug %}"><i class="bi bi-envelope-plus"></i> Draft newsletter</a>
+    </div>
+    <div class="export-list">
+        {% for campaign in lesson.newsletter_campaigns.all %}
+        <article>
+            <div>
+                <strong>{{ campaign.title }}</strong>
+                <small>{{ campaign.get_status_display }}{% if campaign.scheduled_at %} · {{ campaign.scheduled_at|date:"M j, Y g:i A" }}{% endif %}{% if campaign.sent_at %} · sent {{ campaign.sent_at|date:"M j" }}{% endif %}</small>
+                <details class="code-detail"><summary>Email subject and preview</summary><p><strong>{{ campaign.subject }}</strong><br>{{ campaign.preview_text }}</p></details>
+            </div>
+            <span class="block-actions"><a href="{% url 'studio:newsletter-campaign-update' campaign.pk %}">Edit</a>{% if campaign.status != 'sent' %}<form method="post" action="{% url 'studio:newsletter-campaign-mark-sent' campaign.pk %}">{% csrf_token %}<button class="link-button" type="submit">Mark sent</button></form>{% endif %}<a class="text-danger" href="{% url 'studio:newsletter-campaign-delete' campaign.pk %}">Delete</a></span>
+        </article>
+        {% empty %}<div class="empty-state">No email campaign drafted for this lesson yet.</div>{% endfor %}
+    </div>
+</section>
+
+<section class="panel output-section" id="publishing">
+    <div class="panel-heading">
+        <div><span class="eyebrow">PUBLISHING</span><h2>Publishing records</h2></div>
+        <a class="btn btn-sm btn-primary" href="{% url 'studio:publishing-create' lesson.slug %}"><i class="bi bi-plus-lg"></i> Add record</a>
+    </div>
+    <div class="export-list">
+        {% for record in lesson.publishing_records.all %}
+        <article>
+            <div>
+                <strong>{{ record.get_platform_display }} · {{ record.published_at|date:"M j, Y g:i A" }}</strong>
+                <small>
+                    {% if record.post_url %}<a href="{{ record.post_url }}" target="_blank" rel="noopener">Open post</a> · {% endif %}
+                    {{ record.impressions }} impressions · {{ record.reach }} reach · {{ record.engagement_total }} engagements{% if record.engagement_rate %} · {{ record.engagement_rate }}% engagement{% endif %} · {{ record.new_followers }} followers
+                </small>
+                {% if record.caption_text %}<details class="code-detail"><summary>Caption used</summary><div class="caption-copy">{{ record.caption_text|linebreaks }}</div></details>{% endif %}
+            </div>
+            <span class="block-actions"><a href="{% url 'studio:publishing-update' record.pk %}">Edit</a><a class="text-danger" href="{% url 'studio:publishing-delete' record.pk %}">Delete</a></span>
+        </article>
+        {% empty %}<div class="empty-state">No publishing records yet. Add one after posting to Facebook, Instagram, Threads, your website, or email list.</div>{% endfor %}
+    </div>
+</section>
 
 <section class="panel output-section">
     <div class="panel-heading"><div><span class="eyebrow">DOWNLOADS</span><h2>Generated graphics</h2></div></div>

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Learning Activity{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div>
+        <span class="eyebrow">MY LEARNING</span>
+        <h1>Activity history</h1>
+        <p>Review completed lessons, quiz attempts, coding challenge submissions, and badges.</p>
+    </div>
+    <a class="btn btn-primary" href="{% url 'learn:lesson-list' %}">Find another lesson</a>
+</div>
+<div class="dashboard-grid">
+    <section class="panel output-section">
+        <div class="panel-heading"><div><span class="eyebrow">LESSONS</span><h2>Lesson progress</h2></div></div>
+        <div class="lesson-list">
+            {% for item in progress_records %}
+            <a class="lesson-row" href="{% url 'learn:lesson-detail' item.lesson.slug %}">
+                <span class="color-dot" style="--dot: {{ item.lesson.resolved_accent_color }}"></span>
+                <span class="lesson-row__main"><strong>{{ item.lesson.title }}</strong><small>{{ item.get_status_display }} · {{ item.percent_complete }}% · Last activity {{ item.last_activity_at|date:"M j, Y g:i A" }}</small></span>
+            </a>
+            {% empty %}<div class="empty-state">No lesson activity yet.</div>{% endfor %}
+        </div>
+    </section>
+    <section class="panel output-section">
+        <div class="panel-heading"><div><span class="eyebrow">BADGES</span><h2>Badge awards</h2></div></div>
+        <div class="caption-grid">
+            {% for award in badge_awards %}
+            <article class="caption-card"><div class="caption-card__heading"><strong>{{ award.badge.title }}</strong></div><p>{{ award.badge.description }}</p><small>Earned {{ award.awarded_at|date:"M j, Y" }}</small></article>
+            {% empty %}<div class="empty-state">No badges earned yet.</div>{% endfor %}
+        </div>
+    </section>
+</div>
+<div class="dashboard-grid mt-4">
+    <section class="panel output-section">
+        <div class="panel-heading"><div><span class="eyebrow">QUIZZES</span><h2>Quiz attempts</h2></div></div>
+        <div class="lesson-list">
+            {% for attempt in quiz_attempts %}
+            <a class="lesson-row" href="{% url 'learn:lesson-detail' attempt.question.lesson.slug %}">
+                <span class="color-dot" style="--dot: {% if attempt.is_correct %}#22c55e{% else %}#f97316{% endif %}"></span>
+                <span class="lesson-row__main"><strong>{{ attempt.question.lesson.title }}</strong><small>{% if attempt.is_correct %}Correct{% else %}Incorrect{% endif %} · {{ attempt.question.prompt|truncatechars:90 }} · {{ attempt.created_at|date:"M j, Y g:i A" }}</small></span>
+            </a>
+            {% empty %}<div class="empty-state">No quiz attempts yet.</div>{% endfor %}
+        </div>
+    </section>
+    <section class="panel output-section">
+        <div class="panel-heading"><div><span class="eyebrow">CHALLENGES</span><h2>Code submissions</h2></div></div>
+        <div class="lesson-list">
+            {% for attempt in challenge_attempts %}
+            <a class="lesson-row" href="{% url 'learn:challenge-attempt-detail' attempt.pk %}">
+                <span class="color-dot" style="--dot: {% if attempt.passed %}#22c55e{% else %}#64748b{% endif %}"></span>
+                <span class="lesson-row__main"><strong>{{ attempt.challenge.title }}</strong><small>{% if attempt.tests_total %}{{ attempt.tests_passed }}/{{ attempt.tests_total }} tests{% elif attempt.passed %}Passed{% else %}Saved for review{% endif %} · {{ attempt.created_at|date:"M j, Y g:i A" }}</small></span>
+            </a>
+            {% empty %}<div class="empty-state">No coding challenge submissions yet.</div>{% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

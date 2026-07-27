@@ -2,7 +2,9 @@ import io
 import textwrap
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
 
@@ -87,7 +89,7 @@ def _wrap(draw, text: str, font, max_width: int):
     return lines
 
 
-def _draw_python_mark(draw, x: int, y: int, size: int):
+def _draw_python_mark_fallback(draw, x: int, y: int, size: int):
     blue = (55, 118, 171)
     yellow = (255, 212, 59)
     half = size // 2
@@ -99,6 +101,26 @@ def _draw_python_mark(draw, x: int, y: int, size: int):
     eye = max(size // 18, 3)
     draw.ellipse((x + half - eye * 3, y + eye * 3, x + half - eye, y + eye * 5), fill=(8, 20, 35))
     draw.ellipse((x + half + eye, y + size - eye * 5, x + half + eye * 3, y + size - eye * 3), fill=(8, 20, 35))
+
+
+@lru_cache(maxsize=8)
+def _python_logo(size: int):
+    from PIL import Image
+
+    logo_path = settings.BASE_DIR / "static" / "images" / "python-logo-only.png"
+    if not logo_path.exists():
+        return None
+    with Image.open(logo_path) as source:
+        logo = source.convert("RGBA")
+    return logo.resize((size, size), Image.Resampling.LANCZOS)
+
+
+def _paste_python_logo(image, draw, x: int, y: int, size: int):
+    logo = _python_logo(size)
+    if logo is None:
+        _draw_python_mark_fallback(draw, x, y, size)
+        return
+    image.alpha_composite(logo, (x, y))
 
 
 def _draw_background(image, draw, brand: BrandProfile, accent, width: int, height: int):
@@ -203,8 +225,8 @@ def _render_slide(lesson, brand, template, output_format, blocks, slide_number, 
 
     scale = width / 1080
     margin = max(34, int(52 * scale))
-    logo_size = max(60, int(96 * scale))
-    _draw_python_mark(draw, width - margin - logo_size, margin // 2, logo_size)
+    logo_size = max(68, int(110 * scale))
+    _paste_python_logo(image, draw, width - margin - logo_size, margin // 2, logo_size)
 
     label_font = _font(max(18, int(25 * scale)), bold=True)
     title_size = max(38, int((64 if height <= 700 else 72) * scale))

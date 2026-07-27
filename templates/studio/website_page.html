@@ -27,6 +27,9 @@
         .summary { max-width: 760px; color: #bccae0; font-size: clamp(19px, 3vw, 24px); }
         .lesson-meta { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 25px; }
         .pill { padding: 5px 10px; color: #bfd1ec; background: #182238; border: 1px solid var(--border); border-radius: 999px; font-size: 13px; }
+        .learning-card { display: grid; gap: 12px; margin-bottom: 28px; padding: 22px; color: #c6d4ea; background: #101728; border: 1px solid var(--border); border-radius: 16px; }
+        .learning-card strong { color: #eaf1ff; }
+        .learning-card pre { margin-top: 6px; }
         .lesson-body { display: grid; gap: 24px; padding-bottom: 70px; }
         .lesson-block { padding: 26px; background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 16px; }
         .lesson-block h2 { margin: 0 0 13px; font-size: 25px; line-height: 1.2; }
@@ -48,6 +51,11 @@
         .python-output { min-height: 72px; margin: 0; color: #9bf0ae; background: #061b0c; border-top: 1px solid #1d6130; border-radius: 0; white-space: pre-wrap; }
         .python-output.has-error { color: #ffb4b4; background: #2a0b0b; border-color: #813636; }
         .python-playground.is-running .python-editor { opacity: .72; }
+        .practice-card { display: grid; gap: 12px; padding: 24px; background: #101728; border: 1px solid var(--border); border-radius: 16px; }
+        .practice-card h3 { margin: 0; }
+        .choice-button { display: block; width: 100%; margin-top: 8px; padding: 10px 12px; text-align: left; color: var(--ink); background: #0b1020; border: 1px solid var(--border); border-radius: 9px; }
+        .choice-button.is-correct { border-color: #42c767; }
+        .choice-button.is-incorrect { border-color: #e06a6a; }
         .cta { margin: 5px 0 70px; padding: 28px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 35%, #101525), #101525); border: 1px solid var(--accent); border-radius: 18px; font-size: 20px; font-weight: 750; }
         .site-footer { display: flex; justify-content: space-between; gap: 18px; padding: 25px 0 45px; color: var(--muted); border-top: 1px solid var(--border); font-size: 14px; }
         @media (max-width: 600px) { .site-header, .site-footer { align-items: flex-start; flex-direction: column; } .lesson-block { padding: 20px; } }
@@ -63,6 +71,15 @@
             <p class="summary">{{ page.summary }}</p>
             <div class="lesson-meta"><span class="pill">{{ page.difficulty_label }}</span><span class="pill">{{ page.reading_minutes }} min read</span>{% if page.category %}<span class="pill">{{ page.category.name }}</span>{% endif %}{% for tag in page.tags %}<span class="pill">#{{ tag.name }}</span>{% endfor %}</div>
         </section>
+        {% if page.learning.objective or page.learning.beginner_takeaway or page.learning.practice_prompt or page.learning.common_mistake or page.learning.starter_code %}
+        <section class="learning-card">
+            {% if page.learning.objective %}<div><strong>Goal:</strong> {{ page.learning.objective }}</div>{% endif %}
+            {% if page.learning.beginner_takeaway %}<div><strong>Remember:</strong> {{ page.learning.beginner_takeaway }}</div>{% endif %}
+            {% if page.learning.common_mistake %}<div><strong>Common mistake:</strong> {{ page.learning.common_mistake }}</div>{% endif %}
+            {% if page.learning.practice_prompt %}<div><strong>Try it:</strong> {{ page.learning.practice_prompt }}</div>{% endif %}
+            {% if page.learning.starter_code %}<div><strong>Starter code:</strong><pre><code>{{ page.learning.starter_code }}</code></pre></div>{% endif %}
+        </section>
+        {% endif %}
         <article class="lesson-body">
             {% for block in lesson.blocks.all %}
             <section class="lesson-block block-{{ block.block_type }}">
@@ -70,10 +87,36 @@
                 {% if block.block_type == 'code' and page.playground_enabled %}<div class="python-playground" data-python-playground><textarea class="python-editor" data-python-editor aria-label="Editable Python code" spellcheck="false">{{ block.content }}</textarea><div class="playground-controls"><button type="button" data-python-run>Run code</button><button type="button" data-python-stop disabled>Stop</button><button type="button" data-python-reset>Reset</button><small>Ctrl+Enter to run</small></div><pre class="python-output" data-python-output aria-live="polite">Select Run code or press Ctrl+Enter.</pre></div>{% elif block.block_type == 'code' or block.block_type == 'output' %}<pre><code>{{ block.content }}</code></pre>{% else %}{{ block.content|linebreaks }}{% endif %}
             </section>
             {% endfor %}
-        </article>
+        
+            {% if lesson.quiz_questions.all or lesson.code_challenges.all %}
+            <section class="lesson-block block-challenge">
+                <h2>Practice</h2>
+                {% for question in lesson.quiz_questions.all %}{% if question.is_active %}
+                <div class="practice-card" data-quiz-card>
+                    <div class="eyebrow">Question {{ question.position }}</div>
+                    <h3>{{ question.prompt|linebreaksbr }}</h3>
+                    {% for choice in question.choices.all %}<button class="choice-button" type="button" data-quiz-choice data-correct="{{ choice.is_correct|yesno:'true,false' }}">{{ choice.text }}</button>{% endfor %}
+                    <p data-quiz-feedback></p>
+                    {% if question.explanation %}<details><summary>Show explanation</summary><p>{{ question.explanation|linebreaksbr }}</p></details>{% endif %}
+                </div>
+                {% endif %}{% endfor %}
+                {% for challenge in lesson.code_challenges.all %}{% if challenge.is_active %}
+                <div class="practice-card">
+                    <div class="eyebrow">Challenge {{ challenge.position }}</div>
+                    <h3>{{ challenge.title }}</h3>
+                    <p>{{ challenge.prompt|linebreaksbr }}</p>
+                    {% if page.playground_enabled %}<div class="python-playground" data-python-playground data-validation-mode="{{ challenge.validation_mode }}"{% if challenge.expected_output %} data-expected-output="{{ challenge.expected_output|escape }}"{% endif %}><textarea class="python-editor" data-python-editor aria-label="Editable Python challenge code" spellcheck="false">{{ challenge.starter_code|default:lesson.starter_code }}</textarea><div class="playground-controls"><button type="button" data-python-run>Run code</button><button type="button" data-python-stop disabled>Stop</button><button type="button" data-python-reset>Reset</button><small>Ctrl+Enter to run</small></div><pre class="python-output" data-python-output aria-live="polite">Select Run code or press Ctrl+Enter.</pre></div>{% elif challenge.starter_code %}<pre><code>{{ challenge.starter_code }}</code></pre>{% endif %}
+                    {% if challenge.hint_1 or challenge.hint_2 %}<details><summary>Show hints</summary>{% if challenge.hint_1 %}<p>1. {{ challenge.hint_1 }}</p>{% endif %}{% if challenge.hint_2 %}<p>2. {{ challenge.hint_2 }}</p>{% endif %}</details>{% endif %}
+                    {% if challenge.solution_code %}<details><summary>Show solution</summary><pre><code>{{ challenge.solution_code }}</code></pre>{% if challenge.expected_output %}<h4>Expected output</h4><pre><code>{{ challenge.expected_output }}</code></pre>{% endif %}</details>{% endif %}
+                </div>
+                {% endif %}{% endfor %}
+            </section>
+            {% endif %}
+</article>
         <div class="cta">{{ page.call_to_action }}</div>
     </main>
     <footer class="site-footer"><span>&copy; {% now "Y" %} {{ brand.name }}</span><span>{{ page.title }}</span></footer>
+    <script>document.querySelectorAll('[data-quiz-card]').forEach(function(card){var feedback=card.querySelector('[data-quiz-feedback]');card.querySelectorAll('[data-quiz-choice]').forEach(function(button){button.addEventListener('click',function(){var correct=button.dataset.correct==='true';card.querySelectorAll('[data-quiz-choice]').forEach(function(choice){choice.classList.remove('is-correct','is-incorrect');});button.classList.add(correct?'is-correct':'is-incorrect');if(feedback){feedback.textContent=correct?'Correct. Nice work.':'Not quite. Review the choices and try again.';}});});});</script>
     {% if page.playground_enabled %}<script src="{% static 'js/playground.js' %}" defer></script>{% endif %}
 </body>
 </html>

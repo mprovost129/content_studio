@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{% if object %}Edit CTA{% else %}Add CTA{% endif %} · {{ resource.title }}{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div><span class="eyebrow">RESOURCE CTA</span><h1>{% if object %}Edit call-to-action{% else %}Add call-to-action{% endif %}</h1><p>{{ resource.title }}</p></div>
+    <div class="heading-actions"><a class="btn btn-secondary" href="{{ resource.get_absolute_url }}">Back to resource</a></div>
+</div>
+<section class="panel">
+    <form method="post" class="content-form">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        <div class="form-grid">
+            {% for field in form %}
+            <div class="form-field{% if field.name == 'description' or field.name == 'internal_notes' %} form-field--wide{% endif %}">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                {% for error in field.errors %}<div class="form-error">{{ error }}</div>{% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="form-actions"><button class="btn btn-primary" type="submit">Save CTA block</button><a class="btn btn-secondary" href="{{ resource.get_absolute_url }}">Cancel</a></div>
+    </form>
+</section>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Recommendation tuning{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div><span class="eyebrow">RECOMMENDATIONS</span><h1>Recommendation tuning</h1><p>Adjust how Studio ranks lesson, quiz, challenge, PDF, and newsletter CTA suggestions without editing code.</p></div>
+    <div class="heading-actions"><a class="btn btn-secondary" href="{% url 'studio:resource-cta-recommendation-feedback' %}">Feedback report</a><a class="btn btn-secondary" href="{% url 'studio:resource-list' %}">Resources</a></div>
+</div>
+
+<form method="post" class="panel form-panel">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+
+    <section class="mb-4">
+        <span class="eyebrow">PROFILE</span>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'name' or field.name == 'is_active' or field.name == 'notes' %}
+                <div class="col-md-{% if field.name == 'notes' %}12{% else %}6{% endif %}">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="mb-4">
+        <span class="eyebrow">BASE CTA BONUSES</span>
+        <p class="text-muted">These values are added after the lesson/resource match score. Raise the formats you want Studio to recommend more often.</p>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'lesson_cta_bonus' or field.name == 'quiz_cta_bonus' or field.name == 'challenge_cta_bonus' or field.name == 'pdf_open_bonus' or field.name == 'pdf_lead_magnet_bonus' or field.name == 'newsletter_cta_bonus' %}
+                <div class="col-md-4">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="mb-4">
+        <span class="eyebrow">LESSON MATCH WEIGHTS</span>
+        <p class="text-muted">These values decide which lesson becomes the best match before the CTA type bonus is applied.</p>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'related_lesson_weight' or field.name == 'category_match_weight' or field.name == 'difficulty_match_weight' or field.name == 'topic_overlap_weight' or field.name == 'topic_overlap_cap' or field.name == 'active_quiz_weight' or field.name == 'active_challenge_weight' or field.name == 'practice_code_weight' or field.name == 'conversion_weight' or field.name == 'conversion_cap' or field.name == 'cta_click_weight' or field.name == 'cta_click_cap' %}
+                <div class="col-md-3">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="mb-4">
+        <span class="eyebrow">FEEDBACK WEIGHTS</span>
+        <p class="text-muted">These values control how accepted, dismissed, and ignored recommendations affect future rankings.</p>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'exact_accepted_boost' or field.name == 'exact_dismissed_penalty' or field.name == 'ignored_per_show_penalty' or field.name == 'ignored_penalty_cap' or field.name == 'similar_accepted_boost' or field.name == 'similar_accepted_cap' or field.name == 'similar_dismissed_penalty' or field.name == 'similar_dismissed_cap' or field.name == 'similar_ignored_penalty' or field.name == 'similar_ignored_cap' or field.name == 'same_lesson_accepted_boost' or field.name == 'same_lesson_accepted_cap' or field.name == 'same_lesson_dismissed_penalty' or field.name == 'same_lesson_dismissed_cap' or field.name == 'feedback_adjustment_floor' or field.name == 'feedback_adjustment_ceiling' %}
+                <div class="col-md-3">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save tuning controls</button><a class="btn btn-secondary" href="{% url 'studio:resource-cta-recommendation-feedback' %}">Cancel</a></div>
+</form>
+{% endblock %}

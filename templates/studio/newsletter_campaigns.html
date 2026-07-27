@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Newsletter Campaigns{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div><span class="eyebrow">EMAIL</span><h1>Newsletter campaigns</h1><p>Plan weekly beginner Python emails, draft copy from lessons, and track send performance.</p></div>
+    <div class="heading-actions"><a class="btn btn-secondary" href="{% url 'studio:provider-sync-readiness' %}"><i class="bi bi-plug"></i> Sync readiness</a><a class="btn btn-secondary" href="{% url 'studio:subscriber-segment-list' %}"><i class="bi bi-diagram-3"></i> Segments</a><a class="btn btn-secondary" href="{% url 'studio:newsletter-segment-performance' %}"><i class="bi bi-graph-up-arrow"></i> Segment performance</a><a class="btn btn-secondary" href="{% url 'studio:newsletter-subscriber-list' %}"><i class="bi bi-people"></i> Subscribers</a><a class="btn btn-secondary" href="{% url 'studio:newsletter-metric-import' %}"><i class="bi bi-upload"></i> Import metrics</a><a class="btn btn-primary" href="{% url 'studio:newsletter-campaign-create' %}"><i class="bi bi-plus-lg"></i> New campaign</a></div>
+</div>
+
+<section class="metric-grid">
+    <article class="metric-card"><span>Active subscribers</span><strong>{{ active_subscribers }}</strong></article>
+    <article class="metric-card"><span>Draft campaigns</span><strong>{{ draft_count }}</strong></article>
+    <article class="metric-card"><span>Scheduled campaigns</span><strong>{{ scheduled_count }}</strong></article>
+    <article class="metric-card"><span>Sent campaigns</span><strong>{{ sent_count }}</strong></article>
+</section>
+
+<section class="panel">
+    <form class="row g-2 align-items-end" method="get">
+        <div class="col-md-3"><label class="form-label">Search</label><input class="form-control" type="search" name="q" value="{{ query }}" placeholder="Title, subject, lesson, provider ID, or body"></div>
+        <div class="col-md-2"><label class="form-label">Status</label><select class="form-select" name="status"><option value="">All statuses</option>{% for value,label in status_choices %}<option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Quick segment</label><select class="form-select" name="segment"><option value="">All</option>{% for value,label in segment_choices %}<option value="{{ value }}" {% if segment_filter == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Saved segment</label><select class="form-select" name="saved_segment"><option value="">All</option>{% for segment in saved_segments %}<option value="{{ segment.pk }}" {% if saved_segment_filter == segment.pk|stringformat:'s' %}selected{% endif %}>{{ segment.name }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Provider</label><select class="form-select" name="provider"><option value="">All</option>{% for value,label in provider_choices %}<option value="{{ value }}" {% if provider_filter == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Sync</label><select class="form-select" name="sync_status"><option value="">All</option>{% for value,label in sync_status_choices %}<option value="{{ value }}" {% if sync_status_filter == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        <div class="col-md-1 d-grid"><button class="btn btn-primary" type="submit">Filter</button></div>
+    </form>
+</section>
+
+<section class="panel">
+    <div class="panel-heading"><h2>Campaign list</h2><span>{{ page_obj.paginator.count }} campaign{{ page_obj.paginator.count|pluralize }}</span></div>
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead><tr><th>Campaign</th><th>Lesson</th><th>Status</th><th>Scheduled / sent</th><th>Audience</th><th>Provider</th><th>Performance</th><th></th></tr></thead>
+            <tbody>
+                {% for campaign in campaigns %}
+                <tr>
+                    <td><strong>{{ campaign.title }}</strong><br><small>{{ campaign.subject }}</small></td>
+                    <td>{% if campaign.lesson %}<a href="{{ campaign.lesson.get_absolute_url }}">{{ campaign.lesson.title }}</a>{% else %}—{% endif %}</td>
+                    <td><span class="status status--{{ campaign.status }}">{{ campaign.get_status_display }}</span></td>
+                    <td>{% if campaign.sent_at %}Sent {{ campaign.sent_at|date:"M j, g:i A" }}{% elif campaign.scheduled_at %}{{ campaign.scheduled_at|date:"M j, g:i A" }}{% else %}Not scheduled{% endif %}</td>
+                    <td>{% if campaign.saved_segment %}<strong>{{ campaign.saved_segment.name }}</strong><br><small>Saved segment</small>{% else %}{{ campaign.get_target_segment_display }}<br><small>Quick segment</small>{% endif %}<br><small>{{ campaign.actual_recipients|default:campaign.estimated_recipients }} recipient{{ campaign.actual_recipients|default:campaign.estimated_recipients|pluralize }}</small></td>
+                    <td>{{ campaign.get_external_provider_display }}<br><small>{{ campaign.get_provider_sync_status_display }}</small>{% if campaign.external_campaign_id %}<br><small>ID: {{ campaign.external_campaign_id }}</small>{% endif %}</td>
+                    <td><strong>{{ campaign.clicks }}</strong> clicks<br><small>{% if campaign.open_rate %}{{ campaign.open_rate }}% open{% else %}No open rate{% endif %}</small></td>
+                    <td class="text-end">
+                        <div class="btn-group btn-group-sm">
+                            <a class="btn btn-secondary" href="{% url 'studio:newsletter-campaign-update' campaign.pk %}">Edit</a>
+                            <a class="btn btn-outline-primary" href="{% url 'studio:newsletter-metric-import-for-campaign' campaign.pk %}">Import metrics</a>
+                            {% if campaign.status != 'sent' %}<form method="post" action="{% url 'studio:newsletter-campaign-mark-sent' campaign.pk %}">{% csrf_token %}<button class="btn btn-outline-primary" type="submit">Mark sent</button></form>{% endif %}
+                            <a class="btn btn-outline-danger" href="{% url 'studio:newsletter-campaign-delete' campaign.pk %}">Delete</a>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8"><div class="empty-state">No newsletter campaigns yet. Draft one from a lesson or create a standalone campaign.</div></td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if is_paginated %}
+    <nav aria-label="Campaign pagination"><ul class="pagination">
+        {% if page_obj.has_previous %}<li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&q={{ query }}&status={{ status_filter }}&segment={{ segment_filter }}&saved_segment={{ saved_segment_filter }}">Previous</a></li>{% endif %}
+        <li class="page-item disabled"><span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span></li>
+        {% if page_obj.has_next %}<li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&q={{ query }}&status={{ status_filter }}&segment={{ segment_filter }}&saved_segment={{ saved_segment_filter }}">Next</a></li>{% endif %}
+    </ul></nav>
+    {% endif %}
+</section>
+{% endblock %}

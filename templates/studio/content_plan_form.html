@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ form_title }}{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div><span class="eyebrow">PLANNER</span><h1>{{ form_title }}</h1><p>{{ lesson.title }}</p></div>
+    <a class="btn btn-secondary" href="{% url 'studio:content-planner' %}">Back to planner</a>
+</div>
+<form method="post" class="panel form-panel">
+    {% csrf_token %}
+    <div class="form-grid">
+        {% for field in form %}
+        <div class="field {% if field.name == 'notes' or field.name == 'post_goal' %}field--wide{% endif %}">
+            {{ field.label_tag }}
+            {{ field }}
+            {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+            {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+    <div class="form-actions"><button class="btn btn-primary" type="submit">Save plan</button><a class="btn btn-secondary" href="{{ lesson.get_absolute_url }}">Cancel</a></div>
+</form>
+{% endblock %}

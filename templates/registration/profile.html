@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Learner Profile{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div>
+        <span class="eyebrow">ACCOUNT</span>
+        <h1>Learner profile</h1>
+        <p>Set your display name, skill level, weekly practice target, and future email preferences.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url 'learn:dashboard' %}">Back to dashboard</a>
+</div>
+<section class="panel output-section">
+    <form method="post" class="studio-form">
+        {% csrf_token %}
+        <div class="row g-3">
+            {% for field in form %}
+            <div class="col-md-{% if field.name == 'learning_goal' %}12{% elif field.field.widget.input_type == 'checkbox' %}6{% else %}6{% endif %}">
+                {% if field.field.widget.input_type == 'checkbox' %}
+                <div class="form-check mt-4">
+                    {{ field }}
+                    <label class="form-check-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% else %}
+                <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="form-actions mt-4">
+            <button class="btn btn-primary" type="submit">Save profile</button>
+            <a class="btn btn-outline-secondary" href="{% url 'learn:dashboard' %}">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

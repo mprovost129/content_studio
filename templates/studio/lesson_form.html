@@ -8,7 +8,7 @@
         {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
         <div class="form-grid">
         {% for field in form %}
-            <div class="field {% if field.name == 'summary' or field.name == 'internal_notes' or field.name == 'tags' %}field--wide{% endif %}">
+            <div class="field {% if field.name == 'summary' or field.name == 'internal_notes' or field.name == 'tags' or field.name == 'common_mistake' or field.name == 'practice_prompt' or field.name == 'starter_code' or field.name == 'solution_code' or field.name == 'expected_output' %}field--wide{% endif %}">
                 <label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}
                 {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
                 {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}

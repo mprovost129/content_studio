@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Delete CTA{% endblock %}
+{% block content %}
+<section class="panel">
+    <span class="eyebrow">DELETE CTA</span>
+    <h1>Delete this call-to-action?</h1>
+    <p><strong>{{ object.title }}</strong> on {{ object.resource.title }}</p>
+    <p>This removes the block from the public resource page. Existing click and conversion history stays in reports.</p>
+    <form method="post">{% csrf_token %}<button class="btn btn-danger" type="submit">Delete CTA</button> <a class="btn btn-secondary" href="{{ object.resource.get_absolute_url }}">Cancel</a></form>
+</section>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Delete publishing record{% endblock %}
+{% block content %}
+<section class="panel delete-panel">
+    <span class="eyebrow">Confirm delete</span>
+    <h1>Delete this publishing record?</h1>
+    <p>This removes the tracking record only. It does not delete the lesson, caption draft, graphic asset, or public post.</p>
+    <form method="post">
+        {% csrf_token %}
+        <button class="btn btn-danger" type="submit">Delete</button>
+        <a class="btn btn-secondary" href="{{ object.lesson.get_absolute_url }}#publishing">Cancel</a>
+    </form>
+</section>
+{% endblock %}

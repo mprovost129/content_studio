@@ -12,15 +12,39 @@ from .models import (
     AIGeneration,
     AIModelPricing,
     CaptionDraft,
+    CodeChallenge,
+    ContentPlan,
+    EmailProvider,
     GraphicAsset,
     GraphicTemplate,
+    LearningResource,
     Lesson,
     LessonBlock,
+    NewsletterCampaign,
+    NewsletterSubscriber,
+    ProviderSyncStatus,
+    PublishingRecord,
+    QuizChoice,
+    QuizQuestion,
+    RecommendationTuning,
+    ResourceCTA,
+    ResourceCTAClickEvent,
+    ResourceCTARecommendationFeedback,
+    ResourceLeadMagnetAccess,
+    ResourceLessonConversionEvent,
+    ResourcePerformanceEvent,
+    SubscriberSegment,
     Tag,
     WebsiteExport,
 )
-from .services.graphics import generate_graphics
+from .services.graphics import _python_logo, generate_graphics
 from .services.openai import generate_caption
+from .services.resource_pdfs import resource_pdf_filename
+from .services.resource_recommendations import build_resource_cta_recommendations
+from .services.social_carousels import (
+    apply_social_carousel_template_to_lesson,
+    get_social_carousel_template,
+)
 from .services.website import create_website_export, seo_diagnostics, serialize_lesson
 
 
@@ -85,6 +109,40 @@ class GraphicServiceTests(TestCase):
                 self.assertEqual((asset.width, asset.height), (1080, 1080))
                 self.assertTrue(Path(asset.file.path).exists())
 
+    def test_supplied_python_logo_is_available_to_renderer(self):
+        logo = _python_logo(110)
+
+        self.assertIsNotNone(logo)
+        self.assertEqual(logo.mode, "RGBA")
+        self.assertEqual(logo.size, (110, 110))
+        self.assertIsNotNone(logo.getbbox())
+
+
+class SocialCarouselTemplateTests(TestCase):
+    def test_applies_carousel_blocks_and_creates_matching_graphic_template(self):
+        lesson = Lesson.objects.create(
+            title="Python Variables",
+            summary="Variables store values for later use.",
+            beginner_takeaway="A variable is a named container for a value.",
+            expected_output="Michael",
+        )
+        LessonBlock.objects.create(
+            lesson=lesson,
+            position=1,
+            block_type=LessonBlock.BlockType.CODE,
+            title="variables.py",
+            content='name = "Michael"\nprint(name)',
+        )
+
+        template = get_social_carousel_template("code_output_quiz")
+        created = apply_social_carousel_template_to_lesson(lesson, template)
+
+        self.assertEqual(created["blocks"], 5)
+        self.assertEqual(lesson.blocks.count(), 6)
+        self.assertTrue(GraphicTemplate.objects.filter(slug="code-output-quiz-carousel").exists())
+        lesson.refresh_from_db()
+        self.assertEqual(lesson.instagram_status, Lesson.Status.DRAFT)
+
 
 class OpenAIServiceTests(TestCase):
     def setUp(self):
@@ -124,6 +182,8 @@ class OpenAIServiceTests(TestCase):
         self.assertEqual(caption.generation.response_id, "resp_test")
         self.assertEqual(caption.generation.status, AIGeneration.Status.SUCCEEDED)
         self.assertGreater(caption.generation.estimated_cost_usd, 0)
+        request = client_class.return_value.responses.create.call_args.kwargs
+        self.assertIn("do not use Markdown code fences", request["instructions"])
 
 
 class WebsiteServiceTests(TestCase):
@@ -152,7 +212,7 @@ class WebsiteServiceTests(TestCase):
     def test_serializes_versioned_website_contract(self):
         payload = serialize_lesson(self.lesson)
 
-        self.assertEqual(payload["schema_version"], "1.0")
+        self.assertEqual(payload["schema_version"], "1.6")
         self.assertEqual(payload["content_type"], "code_with_michael.lesson")
         self.assertEqual(payload["lesson"]["blocks"][0]["type"], "code")
         self.assertEqual(payload["lesson"]["reading_minutes"], 1)
@@ -174,10 +234,50 @@ class WebsiteServiceTests(TestCase):
         self.assertLess(diagnostics["score"], 100)
 
 
+class PublicSEOTests(TestCase):
+    def setUp(self):
+        self.lesson = Lesson.objects.create(
+            title="SEO Python Lesson",
+            summary="A public beginner Python lesson for SEO testing.",
+            website_status=Lesson.Status.PUBLISHED,
+            seo_title="SEO Python Lesson for Beginners",
+            seo_description="Learn a beginner Python concept with runnable examples and practice.",
+        )
+
+    def test_public_sitemap_lists_public_lessons(self):
+        response = self.client.get(reverse("core:sitemap"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/xml; charset=utf-8")
+        self.assertContains(response, "/learn/", status_code=200)
+        self.assertContains(response, f"/learn/{self.lesson.slug}/", status_code=200)
+
+    def test_robots_points_to_sitemap_and_blocks_private_routes(self):
+        response = self.client.get(reverse("core:robots"))
+
+        self.assertEqual(response["Content-Type"], "text/plain; charset=utf-8")
+        self.assertIn("Disallow: /studio/", response.content.decode())
+        self.assertIn("Sitemap:", response.content.decode())
+
+    def test_rss_feed_lists_latest_public_lessons(self):
+        response = self.client.get(reverse("core:feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/rss+xml; charset=utf-8")
+        self.assertContains(response, self.lesson.title, status_code=200)
+
+    def test_public_lesson_has_canonical_and_json_ld(self):
+        response = self.client.get(reverse("learn:lesson-detail", args=[self.lesson.slug]))
+
+        self.assertContains(response, 'rel="canonical"')
+        self.assertContains(response, 'application/ld+json')
+        self.assertContains(response, 'LearningResource')
+
+
 class StudioViewTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(
-            email="michael@example.com", password="test-password"
+            email="michael@example.com", password="test-password", is_staff=True
         )
 
     def test_dashboard_requires_login(self):
@@ -191,7 +291,7 @@ class StudioViewTests(TestCase):
         response = self.client.get(reverse("studio:dashboard"))
 
         self.assertContains(response, "GETTING STARTED")
-        self.assertContains(response, "1 of 6 setup steps complete")
+        self.assertContains(response, "1 of 12 setup steps complete")
         self.assertContains(response, "Open the complete step-by-step guide")
 
     def test_help_guide_is_private_and_explains_complete_workflow(self):
@@ -220,6 +320,214 @@ class StudioViewTests(TestCase):
         lesson = Lesson.objects.get(title="Python Lists")
         self.assertRedirects(response, lesson.get_absolute_url())
         self.assertEqual(lesson.created_by, self.user)
+
+    def test_staff_can_generate_lesson_from_idea(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("studio:lesson-generate"),
+            {
+                "topic": "Python dictionaries",
+                "audience": "absolute beginners",
+                "objective": "Store and retrieve values by key.",
+                "include_quiz": True,
+                "include_challenge": True,
+            },
+        )
+
+        lesson = Lesson.objects.get(title__icontains="Python dictionaries")
+        self.assertRedirects(response, lesson.get_absolute_url())
+        self.assertEqual(lesson.created_by, self.user)
+
+
+    def test_user_can_record_publishing_metrics_and_update_platform_status(self):
+        lesson = Lesson.objects.create(title="Posted Lesson", instagram_status=Lesson.Status.READY)
+        caption = CaptionDraft.objects.create(
+            lesson=lesson,
+            platform=CaptionDraft.Platform.INSTAGRAM,
+            content="Final Instagram caption",
+            status=CaptionDraft.Status.APPROVED,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("studio:publishing-create", args=[lesson.slug]),
+            {
+                "platform": PublishingRecord.Platform.INSTAGRAM,
+                "published_at": "2026-07-26T10:30",
+                "post_url": "https://example.com/post",
+                "caption": caption.pk,
+                "caption_text": "",
+                "notes": "Posted as a carousel.",
+                "impressions": 1000,
+                "reach": 800,
+                "likes": 120,
+                "comments": 10,
+                "saves": 20,
+                "shares": 5,
+                "clicks": 15,
+                "new_followers": 7,
+                "follower_count_after": 148,
+            },
+        )
+
+        record = PublishingRecord.objects.get(lesson=lesson)
+        lesson.refresh_from_db()
+        self.assertRedirects(response, lesson.get_absolute_url() + "#publishing")
+        self.assertEqual(record.caption_text, "Final Instagram caption")
+        self.assertEqual(record.engagement_total, 170)
+        self.assertEqual(lesson.instagram_status, Lesson.Status.PUBLISHED)
+
+
+    def test_performance_report_groups_posts_by_content_format(self):
+        lesson = Lesson.objects.create(title="Report Lesson")
+        record = PublishingRecord.objects.create(
+            lesson=lesson,
+            platform=PublishingRecord.Platform.INSTAGRAM,
+            impressions=1200,
+            reach=900,
+            likes=120,
+            comments=8,
+            saves=30,
+            shares=12,
+            clicks=20,
+            new_followers=11,
+        )
+        ContentPlan.objects.create(
+            lesson=lesson,
+            platform=ContentPlan.Platform.INSTAGRAM,
+            scheduled_at=record.published_at,
+            status=ContentPlan.Status.POSTED,
+            carousel_template="code_output_quiz",
+            publishing_record=record,
+            created_by=self.user,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("studio:performance-report"))
+
+        self.assertContains(response, "Performance by content format")
+        self.assertContains(response, "Code Output Quiz")
+        self.assertContains(response, "11")
+
+    def test_performance_report_exports_filtered_csv(self):
+        instagram_lesson = Lesson.objects.create(title="Instagram Report Lesson")
+        facebook_lesson = Lesson.objects.create(title="Facebook Report Lesson")
+        instagram_record = PublishingRecord.objects.create(
+            lesson=instagram_lesson,
+            platform=PublishingRecord.Platform.INSTAGRAM,
+            impressions=1200,
+            reach=900,
+            likes=120,
+            comments=8,
+            saves=30,
+            shares=12,
+            clicks=20,
+            new_followers=11,
+            caption_text="Instagram caption",
+        )
+        PublishingRecord.objects.create(
+            lesson=facebook_lesson,
+            platform=PublishingRecord.Platform.FACEBOOK,
+            impressions=2000,
+            reach=1500,
+            likes=60,
+        )
+        ContentPlan.objects.create(
+            lesson=instagram_lesson,
+            platform=ContentPlan.Platform.INSTAGRAM,
+            scheduled_at=instagram_record.published_at,
+            status=ContentPlan.Status.POSTED,
+            carousel_template="code_output_quiz",
+            publishing_record=instagram_record,
+            created_by=self.user,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("studio:performance-report-export"),
+            {"platform": PublishingRecord.Platform.INSTAGRAM, "section": "posts"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        self.assertIn("attachment;", response["Content-Disposition"])
+        csv_text = response.content.decode("utf-8-sig")
+        self.assertIn("Published At,Lesson,Platform,Content Format", csv_text)
+        self.assertIn("Instagram Report Lesson", csv_text)
+        self.assertIn("Code Output Quiz", csv_text)
+        self.assertNotIn("Facebook Report Lesson", csv_text)
+
+    def test_performance_report_exports_format_summary_csv(self):
+        lesson = Lesson.objects.create(title="Format Summary Lesson")
+        record = PublishingRecord.objects.create(
+            lesson=lesson,
+            platform=PublishingRecord.Platform.INSTAGRAM,
+            reach=1000,
+            likes=100,
+            comments=10,
+            saves=20,
+            shares=5,
+            clicks=15,
+            new_followers=9,
+        )
+        ContentPlan.objects.create(
+            lesson=lesson,
+            platform=ContentPlan.Platform.INSTAGRAM,
+            scheduled_at=record.published_at,
+            status=ContentPlan.Status.POSTED,
+            carousel_template="beginner_mistake",
+            publishing_record=record,
+            created_by=self.user,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("studio:performance-report-export"), {"section": "formats"}
+        )
+
+        csv_text = response.content.decode("utf-8-sig")
+        self.assertIn("Format,Source,Posts,Impressions,Reach", csv_text)
+        self.assertIn("Beginner Mistake", csv_text)
+        self.assertIn("9", csv_text)
+
+
+    def test_user_can_create_newsletter_campaign_from_lesson(self):
+        lesson = Lesson.objects.create(
+            title="Python Variables",
+            summary="Variables save values for later use.",
+            learning_objective="Create and print a variable.",
+            beginner_takeaway="A variable is a name attached to a value.",
+            practice_prompt="Create a variable named score and print it.",
+        )
+        NewsletterSubscriber.objects.create(email="learner@example.com")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("studio:newsletter-campaign-create-for-lesson", args=[lesson.slug]))
+
+        self.assertContains(response, "Weekly Python: Python Variables")
+        self.assertContains(response, "Create and print a variable")
+
+    def test_user_can_mark_newsletter_campaign_sent(self):
+        lesson = Lesson.objects.create(title="Email Lesson")
+        campaign = NewsletterCampaign.objects.create(
+            lesson=lesson,
+            title="Weekly Python: Email Lesson",
+            subject="Practice Python: Email Lesson",
+            body="Try this lesson.",
+            status=NewsletterCampaign.Status.SCHEDULED,
+            estimated_recipients=25,
+            created_by=self.user,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("studio:newsletter-campaign-mark-sent", args=[campaign.pk]))
+
+        campaign.refresh_from_db()
+        self.assertRedirects(response, reverse("studio:newsletter-campaign-list"))
+        self.assertEqual(campaign.status, NewsletterCampaign.Status.SENT)
+        self.assertEqual(campaign.actual_recipients, 25)
+        self.assertIsNotNone(campaign.sent_at)
 
     def test_user_can_edit_and_approve_caption(self):
         lesson = Lesson.objects.create(title="List Comprehensions")
@@ -374,7 +682,7 @@ class StudioViewTests(TestCase):
         self.assertContains(preview, "application/ld+json")
         self.assertRedirects(export_response, lesson.get_absolute_url())
         self.assertEqual(json_download["Content-Type"], "application/json; charset=utf-8")
-        self.assertContains(json_download, '"schema_version": "1.0"')
+        self.assertContains(json_download, '"schema_version": "1.6"')
         self.assertEqual(html_download["Content-Type"], "text/html; charset=utf-8")
         self.assertContains(html_download, "Website-ready lesson content.")
 
@@ -401,3 +709,838 @@ class StudioViewTests(TestCase):
         self.assertContains(response, "data-python-playground")
         self.assertContains(response, "pyodide-worker.js")
         self.assertContains(response, "playground.js")
+
+class NewsletterSubscriberTests(TestCase):
+    def test_public_newsletter_signup_creates_active_subscriber(self):
+        response = self.client.post(
+            reverse("learn:newsletter-signup"),
+            {
+                "email": "Learner@Example.com",
+                "first_name": "Learner",
+                "source": "learn_home",
+                "next": reverse("learn:home"),
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        subscriber = NewsletterSubscriber.objects.get(email="learner@example.com")
+        self.assertEqual(subscriber.status, NewsletterSubscriber.Status.ACTIVE)
+        self.assertEqual(subscriber.source, NewsletterSubscriber.Source.LEARN_HOME)
+
+    def test_staff_can_export_newsletter_subscribers(self):
+        user = get_user_model().objects.create_user(email="staff@example.com", password="testpass", is_staff=True)
+        NewsletterSubscriber.objects.create(email="learner@example.com", first_name="Learner")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("studio:newsletter-subscriber-export"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        self.assertContains(response, "learner@example.com")
+
+class NewsletterMetricImportTests(TestCase):
+    def test_staff_can_import_newsletter_campaign_metrics_from_pasted_summary(self):
+        user = get_user_model().objects.create_user(email="staff2@example.com", password="testpass", is_staff=True)
+        lesson = Lesson.objects.create(title="Python Newsletter Lesson")
+        campaign = NewsletterCampaign.objects.create(
+            lesson=lesson,
+            title="Weekly Python",
+            subject="Practice Python",
+            body="Try this lesson.",
+            estimated_recipients=400,
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("studio:newsletter-metric-import-for-campaign", args=[campaign.pk]),
+            {
+                "campaign": campaign.pk,
+                "provider": "manual",
+                "pasted_metrics": "Recipients: 421\nOpens: 212\nClicks: 38\nUnsubscribes: 1\nBounces: 0",
+                "mark_sent": "on",
+            },
+        )
+
+        self.assertRedirects(response, reverse("studio:newsletter-campaign-list"))
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.actual_recipients, 421)
+        self.assertEqual(campaign.opens, 212)
+        self.assertEqual(campaign.clicks, 38)
+        self.assertEqual(campaign.unsubscribes, 1)
+        self.assertEqual(campaign.bounces, 0)
+        self.assertEqual(campaign.status, NewsletterCampaign.Status.SENT)
+        self.assertEqual(campaign.metric_imports.count(), 1)
+
+    def test_staff_can_import_newsletter_campaign_metrics_from_csv(self):
+        user = get_user_model().objects.create_user(email="staff3@example.com", password="testpass", is_staff=True)
+        campaign = NewsletterCampaign.objects.create(
+            title="Standalone Email",
+            subject="Python tip",
+            body="Tip body.",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("studio:newsletter-metric-import"),
+            {
+                "campaign": campaign.pk,
+                "provider": "mailchimp",
+                "pasted_metrics": "recipients,opens,clicks,unsubscribes,bounces\n100,50,12,0,1",
+            },
+        )
+
+        self.assertRedirects(response, reverse("studio:newsletter-campaign-list"))
+        campaign.refresh_from_db()
+        self.assertEqual(campaign.actual_recipients, 100)
+        self.assertEqual(campaign.opens, 50)
+        self.assertEqual(campaign.clicks, 12)
+        self.assertEqual(campaign.bounces, 1)
+
+
+class SubscriberSegmentTests(TestCase):
+    def test_segment_matches_subscribers_by_source_and_status(self):
+        staff = get_user_model().objects.create_user(email="segment-staff@example.com", password="testpass", is_staff=True)
+        lesson = Lesson.objects.create(title="Segment Lesson")
+        NewsletterSubscriber.objects.create(email="active@example.com", source=NewsletterSubscriber.Source.LESSON, source_lesson=lesson)
+        NewsletterSubscriber.objects.create(email="other@example.com", source=NewsletterSubscriber.Source.LEARN_HOME)
+        NewsletterSubscriber.objects.create(email="unsub@example.com", status=NewsletterSubscriber.Status.UNSUBSCRIBED, source=NewsletterSubscriber.Source.LESSON, source_lesson=lesson)
+        segment = SubscriberSegment.objects.create(
+            name="Active lesson signups",
+            source_filter=NewsletterSubscriber.Source.LESSON,
+            source_lesson=lesson,
+            created_by=staff,
+        )
+
+        self.assertEqual(segment.subscriber_count, 1)
+        self.assertEqual(segment.matching_subscribers().first().email, "active@example.com")
+
+    def test_staff_can_export_segment_subscribers(self):
+        staff = get_user_model().objects.create_user(email="segment-export@example.com", password="testpass", is_staff=True)
+        NewsletterSubscriber.objects.create(email="learner@example.com")
+        segment = SubscriberSegment.objects.create(name="All active")
+        self.client.force_login(staff)
+
+        response = self.client.get(reverse("studio:subscriber-segment-export", args=[segment.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        self.assertContains(response, "learner@example.com")
+
+    def test_campaign_can_use_saved_segment_for_estimated_recipients(self):
+        staff = get_user_model().objects.create_user(email="campaign-segment@example.com", password="testpass", is_staff=True)
+        NewsletterSubscriber.objects.create(email="one@example.com")
+        NewsletterSubscriber.objects.create(email="two@example.com")
+        segment = SubscriberSegment.objects.create(name="Active audience")
+        self.client.force_login(staff)
+
+        response = self.client.post(
+            reverse("studio:newsletter-campaign-create"),
+            {
+                "title": "Segment email",
+                "subject": "Python practice",
+                "body": "Try this beginner Python exercise.",
+                "status": NewsletterCampaign.Status.DRAFT,
+                "target_segment": NewsletterCampaign.Segment.ALL_ACTIVE,
+                "saved_segment": segment.pk,
+                "estimated_recipients": 0,
+                "actual_recipients": 0,
+                "opens": 0,
+                "clicks": 0,
+                "unsubscribes": 0,
+                "bounces": 0,
+            },
+        )
+
+        self.assertRedirects(response, reverse("studio:newsletter-campaign-list"))
+        campaign = NewsletterCampaign.objects.get(title="Segment email")
+        self.assertEqual(campaign.saved_segment, segment)
+        self.assertEqual(campaign.estimated_recipients, 2)
+
+
+
+class ProviderSyncReadinessTests(TestCase):
+    def test_readiness_report_flags_missing_provider_ids(self):
+        staff = get_user_model().objects.create_user(email="sync-report@example.com", password="testpass", is_staff=True)
+        NewsletterSubscriber.objects.create(
+            email="mapped@example.com",
+            external_provider=EmailProvider.MAILCHIMP,
+            provider_sync_status=ProviderSyncStatus.READY,
+        )
+        self.client.force_login(staff)
+
+        response = self.client.get(reverse("studio:provider-sync-readiness"), {"issue": "missing_ids"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "mapped@example.com")
+        self.assertContains(response, "External contact ID")
+        self.assertContains(response, "External list/audience ID")
+
+    def test_readiness_csv_export_includes_campaign_provider_mapping(self):
+        staff = get_user_model().objects.create_user(email="sync-export@example.com", password="testpass", is_staff=True)
+        NewsletterCampaign.objects.create(
+            title="Provider test",
+            subject="Python practice",
+            body="Practice this week.",
+            external_provider=EmailProvider.BEEHIIV,
+            external_campaign_id="camp_123",
+            external_audience_id="pub_456",
+            provider_sync_status=ProviderSyncStatus.SYNCED,
+        )
+        self.client.force_login(staff)
+
+        response = self.client.get(reverse("studio:provider-sync-readiness-export"), {"record_type": "campaign"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        self.assertContains(response, "Provider test")
+        self.assertContains(response, "camp_123")
+        self.assertContains(response, "pub_456")
+
+
+
+class LearningResourceTests(TestCase):
+    def test_public_resource_library_lists_published_resources(self):
+        LearningResource.objects.create(
+            title="Python List Cheat Sheet",
+            summary="A quick reference for beginner list operations.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            content="Use append() to add one item to a list.",
+        )
+
+        response = self.client.get(reverse("learn:resource-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Python List Cheat Sheet")
+
+    def test_staff_can_create_resource(self):
+        staff = get_user_model().objects.create_user(email="resource-staff@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+
+        response = self.client.post(
+            reverse("studio:resource-create"),
+            {
+                "title": "Common NameError Fixes",
+                "summary": "How beginners can fix undefined variable errors.",
+                "resource_type": LearningResource.ResourceType.COMMON_ERROR,
+                "status": LearningResource.Status.READY,
+                "difficulty": Lesson.Difficulty.BEGINNER,
+                "content": "Check spelling and make sure the variable is created before you use it.",
+                "estimated_read_minutes": 4,
+            },
+        )
+
+        resource = LearningResource.objects.get(title="Common NameError Fixes")
+        self.assertRedirects(response, resource.get_absolute_url())
+        self.assertEqual(resource.created_by, staff)
+
+    def test_staff_can_generate_resource_from_idea(self):
+        staff = get_user_model().objects.create_user(email="resource-generator@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+
+        response = self.client.post(
+            reverse("studio:resource-generate"),
+            {
+                "topic": "calculating a total price",
+                "resource_type": LearningResource.ResourceType.CHEAT_SHEET,
+                "audience": "absolute beginners",
+            },
+        )
+
+        resource = LearningResource.objects.get(title="Calculating a Total Price Cheat Sheet for Python Beginners")
+        self.assertRedirects(response, resource.get_absolute_url())
+        self.assertEqual(resource.status, LearningResource.Status.DRAFT)
+        self.assertEqual(resource.created_by, staff)
+        self.assertIn("Total: $39.98", resource.content)
+        self.assertIn("${total:.2f}", resource.content)
+
+    def test_staff_can_generate_common_error_resource_from_idea(self):
+        staff = get_user_model().objects.create_user(email="resource-error-generator@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+
+        response = self.client.post(
+            reverse("studio:resource-generate"),
+            {
+                "topic": "NameError",
+                "resource_type": LearningResource.ResourceType.COMMON_ERROR,
+                "audience": "Facebook followers",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        resource = LearningResource.objects.get(title="How to Fix NameError in Python")
+        self.assertIn("Beginner checklist", resource.content)
+        self.assertEqual(resource.resource_type, LearningResource.ResourceType.COMMON_ERROR)
+
+    def test_public_pdf_download_for_enabled_resource(self):
+        resource = LearningResource.objects.create(
+            title="Python Variables Cheat Sheet",
+            summary="A printable beginner reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            content="""What to remember
+Variables store values.
+
+```python
+name = "Michael"
+print(name)
+```
+""",
+            pdf_download_enabled=True,
+        )
+
+        response = self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+        self.assertIn(resource_pdf_filename(resource), response["Content-Disposition"])
+        self.assertTrue(response.content.startswith(b"%PDF"))
+
+    def test_public_pdf_redirects_when_disabled(self):
+        resource = LearningResource.objects.create(
+            title="Private PDF Disabled",
+            summary="No generated PDF yet.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            content="Read this online.",
+            pdf_download_enabled=False,
+        )
+
+        response = self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
+
+        self.assertRedirects(response, resource.public_url)
+
+    def test_generated_download_resource_enables_pdf_by_default(self):
+        staff = get_user_model().objects.create_user(email="pdf-resource-generator@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+
+        response = self.client.post(
+            reverse("studio:resource-generate"),
+            {
+                "topic": "loops",
+                "resource_type": LearningResource.ResourceType.DOWNLOAD,
+                "audience": "absolute beginners",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        resource = LearningResource.objects.get(title="Loops Downloadable Reference")
+        self.assertTrue(resource.pdf_download_enabled)
+        self.assertIn("Print this reference", resource.pdf_footer_note)
+
+
+    def test_gated_resource_pdf_requires_email_before_download(self):
+        resource = LearningResource.objects.create(
+            title="Python Lists PDF Lead Magnet",
+            summary="A gated beginner PDF reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            content="Lists store multiple values.",
+            pdf_download_enabled=True,
+            pdf_requires_email=True,
+            pdf_lead_magnet_headline="Get the Python Lists PDF",
+        )
+
+        response = self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
+        self.assertRedirects(response, reverse("learn:resource-pdf-gate", kwargs={"slug": resource.slug}))
+
+        unlock = self.client.post(
+            reverse("learn:resource-pdf-gate", kwargs={"slug": resource.slug}),
+            {"email": "learner@example.com", "first_name": "Learner"},
+        )
+        self.assertRedirects(
+            unlock,
+            reverse("learn:resource-pdf", kwargs={"slug": resource.slug}),
+            fetch_redirect_response=False,
+        )
+
+        subscriber = NewsletterSubscriber.objects.get(email="learner@example.com")
+        self.assertEqual(subscriber.source, NewsletterSubscriber.Source.RESOURCE)
+        self.assertEqual(subscriber.source_resource, resource)
+
+        pdf = self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
+        self.assertEqual(pdf.status_code, 200)
+        self.assertEqual(pdf["Content-Type"], "application/pdf")
+        access = ResourceLeadMagnetAccess.objects.get(resource=resource, email="learner@example.com")
+        self.assertEqual(access.download_count, 1)
+
+    def test_open_resource_pdf_still_downloads_without_email_gate(self):
+        resource = LearningResource.objects.create(
+            title="Open Variables PDF",
+            summary="Open PDF reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            content="Variables store values.",
+            pdf_download_enabled=True,
+            pdf_requires_email=False,
+        )
+
+        response = self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/pdf")
+
+
+    def test_resource_performance_events_track_view_unlock_and_download(self):
+        resource = LearningResource.objects.create(
+            title="Tracked Lists PDF",
+            summary="Track this gated PDF.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            content="Lists store many values.",
+            pdf_download_enabled=True,
+            pdf_requires_email=True,
+        )
+
+        detail = self.client.get(reverse("learn:resource-detail", kwargs={"slug": resource.slug}))
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(ResourcePerformanceEvent.objects.filter(resource=resource, event_type=ResourcePerformanceEvent.EventType.VIEW).count(), 1)
+
+        self.client.post(
+            reverse("learn:resource-pdf-gate", kwargs={"slug": resource.slug}),
+            {"email": "tracked@example.com", "first_name": "Tracked"},
+        )
+        self.assertEqual(ResourcePerformanceEvent.objects.filter(resource=resource, event_type=ResourcePerformanceEvent.EventType.PDF_UNLOCK).count(), 1)
+
+        self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
+        self.assertEqual(ResourcePerformanceEvent.objects.filter(resource=resource, event_type=ResourcePerformanceEvent.EventType.PDF_DOWNLOAD).count(), 1)
+
+    def test_resource_performance_report_export_contains_resource_metrics(self):
+        staff = get_user_model().objects.create_user(email="resource-report@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        resource = LearningResource.objects.create(
+            title="Tracked Variables Resource",
+            summary="Variables reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            content="Variables store values.",
+        )
+        ResourcePerformanceEvent.objects.create(resource=resource, event_type=ResourcePerformanceEvent.EventType.VIEW)
+
+        response = self.client.get(reverse("studio:resource-performance-report-export"), {"section": "resources"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        self.assertIn("Tracked Variables Resource", response.content.decode())
+
+
+    def test_resource_attribution_tracks_lesson_view_conversion(self):
+        resource = LearningResource.objects.create(
+            title="Variables Cheat Sheet",
+            summary="A quick variables reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            content="Variables store values.",
+        )
+        lesson = Lesson.objects.create(
+            title="Variables Lesson",
+            summary="Learn variables.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+        )
+
+        self.client.get(reverse("learn:resource-detail", kwargs={"slug": resource.slug}))
+        response = self.client.get(reverse("learn:lesson-detail", kwargs={"slug": lesson.slug}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            ResourceLessonConversionEvent.objects.filter(
+                resource=resource,
+                lesson=lesson,
+                event_type=ResourceLessonConversionEvent.EventType.LESSON_VIEW,
+            ).count(),
+            1,
+        )
+
+    def test_resource_conversion_report_export_contains_conversion_metrics(self):
+        staff = get_user_model().objects.create_user(email="conversion-report@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        resource = LearningResource.objects.create(
+            title="Loops Cheat Sheet",
+            summary="Loop reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            content="Loops repeat code.",
+        )
+        lesson = Lesson.objects.create(
+            title="Loops Lesson",
+            summary="Learn loops.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+        )
+        ResourceLessonConversionEvent.objects.create(
+            resource=resource,
+            lesson=lesson,
+            event_type=ResourceLessonConversionEvent.EventType.LESSON_VIEW,
+        )
+
+        response = self.client.get(reverse("studio:resource-conversion-report-export"), {"section": "resources"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        self.assertIn("Loops Cheat Sheet", response.content.decode())
+
+
+    def test_resource_cta_click_tracks_and_attributes_conversion(self):
+        resource = LearningResource.objects.create(
+            title="CTA Variables Resource",
+            summary="A quick variables reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            content="Variables store values.",
+        )
+        lesson = Lesson.objects.create(
+            title="CTA Variables Lesson",
+            summary="Learn variables.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+        )
+        cta = ResourceCTA.objects.create(
+            resource=resource,
+            position=1,
+            target_type=ResourceCTA.TargetType.LESSON,
+            title="Start the matching lesson",
+            button_label="Start lesson",
+            target_lesson=lesson,
+        )
+
+        response = self.client.get(reverse("learn:resource-cta-click", kwargs={"resource_slug": resource.slug, "pk": cta.pk}))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(ResourceCTAClickEvent.objects.filter(cta=cta, resource=resource).count(), 1)
+
+        self.client.get(reverse("learn:lesson-detail", kwargs={"slug": lesson.slug}))
+        conversion = ResourceLessonConversionEvent.objects.filter(resource=resource, lesson=lesson, cta=cta).first()
+        self.assertIsNotNone(conversion)
+        self.assertEqual(conversion.event_type, ResourceLessonConversionEvent.EventType.LESSON_VIEW)
+
+    def test_resource_cta_report_export_contains_cta_metrics(self):
+        staff = get_user_model().objects.create_user(email="cta-report@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        resource = LearningResource.objects.create(
+            title="CTA Report Resource",
+            summary="CTA report reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            content="Practice next.",
+        )
+        lesson = Lesson.objects.create(
+            title="CTA Report Lesson",
+            summary="Learn with a CTA.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+        )
+        cta = ResourceCTA.objects.create(
+            resource=resource,
+            position=1,
+            target_type=ResourceCTA.TargetType.CHALLENGE,
+            title="Practice with a challenge",
+            button_label="Practice now",
+            target_lesson=lesson,
+        )
+        ResourceCTAClickEvent.objects.create(resource=resource, cta=cta, target_lesson=lesson, target_url="/learn/example/")
+
+        response = self.client.get(reverse("studio:resource-cta-report-export"), {"section": "ctas"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        self.assertIn("Practice with a challenge", response.content.decode())
+
+
+class ResourceCTARecommendationTests(TestCase):
+    def test_resource_detail_recommends_and_applies_matching_lesson_cta(self):
+        staff = get_user_model().objects.create_user(email="cta-recommend@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        lesson = Lesson.objects.create(
+            title="Python Lists for Beginners",
+            summary="Lists store multiple values in order.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+            difficulty=Lesson.Difficulty.BEGINNER,
+            learning_objective="Create and read values from a Python list.",
+        )
+        resource = LearningResource.objects.create(
+            title="Python Lists Cheat Sheet",
+            summary="A quick list reference for beginners.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            difficulty=Lesson.Difficulty.BEGINNER,
+            content="Lists store multiple values and keep them in order.",
+        )
+        resource.related_lessons.add(lesson)
+
+        recommendations = build_resource_cta_recommendations(resource)
+        self.assertTrue(any(item.key == f"lesson:{lesson.pk}" for item in recommendations))
+
+        response = self.client.post(
+            reverse("studio:resource-cta-recommendation-apply", kwargs={"slug": resource.slug}),
+            {"recommendation_key": f"lesson:{lesson.pk}"},
+        )
+
+        self.assertRedirects(response, resource.get_absolute_url())
+        cta = ResourceCTA.objects.get(resource=resource, target_type=ResourceCTA.TargetType.LESSON)
+        self.assertEqual(cta.target_lesson, lesson)
+        self.assertIn("Start the matching lesson", cta.title)
+
+    def test_resource_recommendations_include_quiz_and_challenge_when_available(self):
+        lesson = Lesson.objects.create(
+            title="Python Conditionals",
+            summary="Use if statements to make decisions.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+            difficulty=Lesson.Difficulty.BEGINNER,
+        )
+        question = QuizQuestion.objects.create(lesson=lesson, position=1, prompt="What keyword starts a condition?")
+        QuizChoice.objects.create(question=question, position=1, text="if", is_correct=True)
+        CodeChallenge.objects.create(
+            lesson=lesson,
+            position=1,
+            title="Check a score",
+            prompt="Print Pass when a score is at least 70.",
+            starter_code="score = 72",
+            expected_output="Pass",
+        )
+        resource = LearningResource.objects.create(
+            title="Conditionals Cheat Sheet",
+            summary="A decision-making reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            difficulty=Lesson.Difficulty.BEGINNER,
+            content="Use if statements to make decisions.",
+        )
+        resource.related_lessons.add(lesson)
+
+        keys = {item.key for item in build_resource_cta_recommendations(resource, limit=10)}
+
+        self.assertIn(f"quiz:{lesson.pk}", keys)
+        self.assertIn(f"challenge:{lesson.pk}", keys)
+
+
+    def test_recommendation_feedback_records_shown_and_dismissed(self):
+        staff = get_user_model().objects.create_user(email="cta-feedback@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        lesson = Lesson.objects.create(
+            title="Python Dictionaries",
+            summary="Dictionaries store key value pairs.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+            difficulty=Lesson.Difficulty.BEGINNER,
+        )
+        resource = LearningResource.objects.create(
+            title="Dictionaries Cheat Sheet",
+            summary="A key value reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            difficulty=Lesson.Difficulty.BEGINNER,
+            content="Dictionaries store values by key.",
+        )
+        resource.related_lessons.add(lesson)
+
+        self.client.get(reverse("studio:resource-detail", kwargs={"slug": resource.slug}))
+        feedback = ResourceCTARecommendationFeedback.objects.get(resource=resource, recommendation_key=f"lesson:{lesson.pk}")
+        self.assertEqual(feedback.status, ResourceCTARecommendationFeedback.Status.SHOWN)
+
+        response = self.client.post(
+            reverse("studio:resource-cta-recommendation-dismiss", kwargs={"slug": resource.slug}),
+            {"recommendation_key": f"lesson:{lesson.pk}"},
+        )
+
+        self.assertRedirects(response, resource.get_absolute_url())
+        feedback.refresh_from_db()
+        self.assertEqual(feedback.status, ResourceCTARecommendationFeedback.Status.DISMISSED)
+        self.assertIsNotNone(feedback.dismissed_at)
+
+    def test_applying_recommendation_marks_feedback_accepted(self):
+        staff = get_user_model().objects.create_user(email="cta-accepted@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        lesson = Lesson.objects.create(
+            title="Python Tuples",
+            summary="Tuples store ordered values.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+            difficulty=Lesson.Difficulty.BEGINNER,
+        )
+        resource = LearningResource.objects.create(
+            title="Tuples Cheat Sheet",
+            summary="Tuple quick reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            difficulty=Lesson.Difficulty.BEGINNER,
+            content="Tuples store ordered values.",
+        )
+        resource.related_lessons.add(lesson)
+
+        self.client.post(
+            reverse("studio:resource-cta-recommendation-apply", kwargs={"slug": resource.slug}),
+            {"recommendation_key": f"lesson:{lesson.pk}"},
+        )
+
+        feedback = ResourceCTARecommendationFeedback.objects.get(resource=resource, recommendation_key=f"lesson:{lesson.pk}")
+        self.assertEqual(feedback.status, ResourceCTARecommendationFeedback.Status.ACCEPTED)
+        self.assertIsNotNone(feedback.applied_cta)
+
+    def test_exact_feedback_adjusts_recommendation_score(self):
+        lesson = Lesson.objects.create(
+            title="Python Sets",
+            summary="Sets store unique values.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+            difficulty=Lesson.Difficulty.BEGINNER,
+        )
+        resource = LearningResource.objects.create(
+            title="Sets Cheat Sheet",
+            summary="Unique values reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            difficulty=Lesson.Difficulty.BEGINNER,
+            content="Sets store unique values.",
+        )
+        resource.related_lessons.add(lesson)
+        initial = next(item for item in build_resource_cta_recommendations(resource, limit=10) if item.key == f"lesson:{lesson.pk}")
+        ResourceCTARecommendationFeedback.objects.create(
+            resource=resource,
+            recommendation_key=f"lesson:{lesson.pk}",
+            target_type=ResourceCTA.TargetType.LESSON,
+            target_lesson=lesson,
+            title="Start the matching lesson: Python Sets",
+            score=initial.score,
+            reasons=[],
+            status=ResourceCTARecommendationFeedback.Status.DISMISSED,
+        )
+
+        adjusted = next(item for item in build_resource_cta_recommendations(resource, limit=10) if item.key == f"lesson:{lesson.pk}")
+
+        self.assertLess(adjusted.feedback_adjustment, 0)
+        self.assertLess(adjusted.score, adjusted.base_score)
+        self.assertTrue(adjusted.is_dismissed)
+        self.assertTrue(any("dismissed" in note for note in adjusted.ranking_notes))
+
+    def test_accepted_patterns_boost_similar_recommendations(self):
+        accepted_lesson = Lesson.objects.create(
+            title="Python Lists",
+            summary="Lists keep values in order.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+            difficulty=Lesson.Difficulty.BEGINNER,
+        )
+        source_resource = LearningResource.objects.create(
+            title="Lists Cheat Sheet",
+            summary="List reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            difficulty=Lesson.Difficulty.BEGINNER,
+            content="Lists keep values in order.",
+        )
+        ResourceCTARecommendationFeedback.objects.create(
+            resource=source_resource,
+            recommendation_key=f"lesson:{accepted_lesson.pk}",
+            target_type=ResourceCTA.TargetType.LESSON,
+            target_lesson=accepted_lesson,
+            title="Start the matching lesson: Python Lists",
+            score=100,
+            reasons=[],
+            status=ResourceCTARecommendationFeedback.Status.ACCEPTED,
+        )
+
+        target_lesson = Lesson.objects.create(
+            title="Python Tuples",
+            summary="Tuples keep ordered values.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+            difficulty=Lesson.Difficulty.BEGINNER,
+        )
+        target_resource = LearningResource.objects.create(
+            title="Tuples Cheat Sheet",
+            summary="Tuple reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            difficulty=Lesson.Difficulty.BEGINNER,
+            content="Tuples keep ordered values.",
+        )
+        target_resource.related_lessons.add(target_lesson)
+
+        recommendation = next(item for item in build_resource_cta_recommendations(target_resource, limit=10) if item.key == f"lesson:{target_lesson.pk}")
+
+        self.assertGreater(recommendation.feedback_adjustment, 0)
+        self.assertGreater(recommendation.score, recommendation.base_score)
+        self.assertTrue(any("accepted" in note for note in recommendation.ranking_notes))
+
+
+    def test_recommendation_tuning_changes_cta_bonus(self):
+        tuning = RecommendationTuning.get_active()
+        tuning.lesson_cta_bonus = 1
+        tuning.quiz_cta_bonus = 90
+        tuning.save()
+        lesson = Lesson.objects.create(
+            title="Python Boolean Quiz",
+            summary="Booleans use True and False.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+            difficulty=Lesson.Difficulty.BEGINNER,
+        )
+        QuizQuestion.objects.create(lesson=lesson, prompt="Which value is a Boolean?", explanation="True is a Boolean.")
+        resource = LearningResource.objects.create(
+            title="Boolean Cheat Sheet",
+            summary="Boolean reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            difficulty=Lesson.Difficulty.BEGINNER,
+            content="Booleans use True and False.",
+        )
+        resource.related_lessons.add(lesson)
+
+        recommendations = build_resource_cta_recommendations(resource, limit=10)
+        lesson_rec = next(item for item in recommendations if item.key == f"lesson:{lesson.pk}")
+        quiz_rec = next(item for item in recommendations if item.key == f"quiz:{lesson.pk}")
+
+        self.assertGreater(quiz_rec.score, lesson_rec.score)
+
+    def test_recommendation_tuning_view_updates_active_profile(self):
+        staff = get_user_model().objects.create_user(email="tuning@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = RecommendationTuning.get_active()
+        response = self.client.post(
+            reverse("studio:recommendation-tuning"),
+            {
+                "name": "Growth tuning",
+                "is_active": "on",
+                "lesson_cta_bonus": 25,
+                "quiz_cta_bonus": 45,
+                "challenge_cta_bonus": 55,
+                "pdf_open_bonus": 35,
+                "pdf_lead_magnet_bonus": 80,
+                "newsletter_cta_bonus": 30,
+                "related_lesson_weight": 80,
+                "category_match_weight": 30,
+                "difficulty_match_weight": 18,
+                "topic_overlap_weight": 8,
+                "topic_overlap_cap": 40,
+                "active_quiz_weight": 10,
+                "active_challenge_weight": 12,
+                "practice_code_weight": 5,
+                "conversion_weight": 6,
+                "conversion_cap": 48,
+                "cta_click_weight": 3,
+                "cta_click_cap": 24,
+                "exact_accepted_boost": 60,
+                "exact_dismissed_penalty": 90,
+                "ignored_per_show_penalty": 8,
+                "ignored_penalty_cap": 40,
+                "similar_accepted_boost": 6,
+                "similar_accepted_cap": 30,
+                "similar_dismissed_penalty": 8,
+                "similar_dismissed_cap": 40,
+                "similar_ignored_penalty": 3,
+                "similar_ignored_cap": 18,
+                "same_lesson_accepted_boost": 5,
+                "same_lesson_accepted_cap": 20,
+                "same_lesson_dismissed_penalty": 6,
+                "same_lesson_dismissed_cap": 24,
+                "feedback_adjustment_floor": -120,
+                "feedback_adjustment_ceiling": 90,
+                "notes": "Favor lead magnets and challenge practice.",
+            },
+        )
+
+        self.assertRedirects(response, reverse("studio:recommendation-tuning"))
+        tuning.refresh_from_db()
+        self.assertEqual(tuning.name, "Growth tuning")
+        self.assertEqual(tuning.challenge_cta_bonus, 55)

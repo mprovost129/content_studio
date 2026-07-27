@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Weekly Content Planner{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div><span class="eyebrow">SCHEDULE</span><h1>Weekly content planner</h1><p>Plan what Code with Michael will publish by platform, lesson, caption, and graphic.</p></div>
+    <div class="heading-actions"><a class="btn btn-secondary" href="{% url 'studio:content-planner' %}?week={{ previous_week|date:'Y-m-d' }}"><i class="bi bi-chevron-left"></i> Previous</a><a class="btn btn-secondary" href="{% url 'studio:content-planner' %}?week={{ next_week|date:'Y-m-d' }}">Next <i class="bi bi-chevron-right"></i></a><a class="btn btn-primary" href="{% url 'studio:lesson-list' %}"><i class="bi bi-plus-lg"></i> Choose lesson</a></div>
+</div>
+
+<section class="metric-grid">
+    <article class="metric-card metric-card--accent"><span>Week</span><strong>{{ week_start|date:"M j" }}–{{ week_end|date:"M j" }}</strong></article>
+    {% for item in platform_counts %}<article class="metric-card"><span>{{ item.platform|title }}</span><strong>{{ item.total }}</strong></article>{% empty %}<article class="metric-card"><span>Planned posts</span><strong>0</strong></article>{% endfor %}
+</section>
+
+<section class="planner-board">
+    {% for day in days %}
+    <div class="planner-day panel">
+        <div class="planner-day__heading"><strong>{{ day.date|date:"D" }}</strong><span>{{ day.date|date:"M j" }}</span></div>
+        <div class="planner-day__items">
+            {% for plan in day.plans %}
+            <article class="planner-card">
+                <div class="planner-card__top"><span class="status status--{{ plan.status }}">{{ plan.get_status_display }}</span><small>{{ plan.scheduled_at|date:"g:i A" }}</small></div>
+                <strong><a href="{{ plan.lesson.get_absolute_url }}">{{ plan.lesson.title }}</a></strong>
+                <small>{{ plan.get_platform_display }}{% if plan.carousel_template %} · {{ plan.carousel_template }}{% endif %}</small>
+                {% if plan.post_goal %}<p>{{ plan.post_goal }}</p>{% endif %}
+                <div class="mini-status-row"><a href="{% url 'studio:content-plan-update' plan.pk %}">Edit</a><a href="{% url 'studio:publishing-create' plan.lesson.slug %}?platform={{ plan.platform }}{% if plan.caption_id %}&caption={{ plan.caption_id }}{% endif %}{% if plan.graphic_id %}&graphic={{ plan.graphic_id }}{% endif %}&plan={{ plan.pk }}">Record post</a></div>
+            </article>
+            {% empty %}<div class="empty-state empty-state--compact">No posts planned.</div>{% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</section>
+
+<section class="panel output-section">
+    <div class="panel-heading"><div><span class="eyebrow">EMAIL</span><h2>Newsletter campaigns this week</h2></div><a href="{% url 'studio:newsletter-campaign-create' %}">New campaign</a></div>
+    <div class="export-list">
+        {% for campaign in newsletter_campaigns %}
+        <article>
+            <div><strong><a href="{% url 'studio:newsletter-campaign-update' campaign.pk %}">{{ campaign.title }}</a></strong><small>{{ campaign.get_status_display }} · {{ campaign.scheduled_at|date:"D, M j, g:i A" }}{% if campaign.lesson %} · {{ campaign.lesson.title }}{% endif %}</small></div>
+            <span>{{ campaign.estimated_recipients }} est.</span>
+        </article>
+        {% empty %}<div class="empty-state">No email campaigns scheduled this week.</div>{% endfor %}
+    </div>
+</section>
+
+<div class="dashboard-grid output-section">
+    <section class="panel">
+        <div class="panel-heading"><div><span class="eyebrow">READY TO SCHEDULE</span><h2>Ready lessons without a plan this week</h2></div></div>
+        <div class="export-list">
+            {% for lesson in unscheduled_ready_lessons %}
+            <article>
+                <div><strong><a href="{{ lesson.get_absolute_url }}">{{ lesson.title }}</a></strong><small>{{ lesson.category|default:"Uncategorized" }}{% if lesson.series %} · {{ lesson.series }}{% endif %}</small></div>
+                <span><a href="{% url 'studio:content-plan-create' lesson.slug %}">Plan post</a></span>
+            </article>
+            {% empty %}<div class="empty-state">All ready lessons already have a plan this week, or no lessons are ready.</div>{% endfor %}
+        </div>
+    </section>
+    <section class="panel">
+        <div class="panel-heading"><div><span class="eyebrow">STATUS MIX</span><h2>This week</h2></div></div>
+        <div class="generation-list">
+            {% for item in status_counts %}<div class="generation-row"><span><strong>{{ item.status|title }}</strong><small>Scheduled items</small></span><span class="text-end"><strong>{{ item.total }}</strong></span></div>{% empty %}<div class="empty-state">No planned content for this week.</div>{% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

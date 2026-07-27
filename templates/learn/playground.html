@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Python Playground{% endblock %}
+{% block meta_description %}Run beginner Python examples directly in your browser with the Code with Michael Python playground.{% endblock %}
+{% block extra_meta %}
+<meta property="og:type" content="website">
+<meta property="og:title" content="Python Playground">
+<meta property="og:description" content="Run beginner Python examples directly in your browser.">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta name="twitter:card" content="summary">
+{% endblock %}
+{% block content %}
+<div data-python-worker="{% static 'js/pyodide-worker.js' %}"></div>
+<div class="page-heading"><div><span class="eyebrow">PRACTICE</span><h1>Python playground</h1><p>Try small Python examples directly in the browser. This is designed for safe beginner practice, not server-side programs.</p></div><a class="btn btn-secondary" href="{% url 'learn:lesson-list' %}">Lessons</a></div>
+<section class="panel playground-page-card">
+    <div class="python-playground" data-python-playground>
+        <textarea class="python-editor" data-python-editor aria-label="Editable Python code" spellcheck="false">name = "Michael"
+print(f"Hello, {name}!")
+
+for number in range(1, 4):
+    print(number)</textarea>
+        <div class="playground-controls"><button type="button" data-python-run>Run code</button><button type="button" data-python-stop disabled>Stop</button><button type="button" data-python-reset>Reset</button><small>Ctrl+Enter to run</small></div>
+        <pre class="python-output" data-python-output aria-live="polite">Select Run code or press Ctrl+Enter.</pre>
+    </div>
+</section>
+<script src="{% static 'js/playground.js' %}" defer></script>
+{% endblock %}

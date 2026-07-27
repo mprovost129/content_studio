@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Generate lesson from idea{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div>
+        <span class="eyebrow">DRAFT GENERATOR</span>
+        <h1>Generate lesson from idea</h1>
+        <p>Create a review-ready beginner lesson draft with teaching fields, content blocks, a quiz, a code challenge, and a starter test case.</p>
+    </div>
+    <a class="btn btn-secondary" href="{% url 'studio:lesson-list' %}"><i class="bi bi-journal-code"></i> Lesson library</a>
+</div>
+
+<div class="detail-grid">
+    <section class="panel">
+        <div class="panel-heading">
+            <div><span class="eyebrow">INPUT</span><h2>Lesson idea</h2></div>
+        </div>
+        <form method="post" class="stacked-form">
+            {% csrf_token %}
+            {% for field in form %}
+            <div class="form-field {% if field.field.widget.input_type == 'checkbox' %}form-field--checkbox{% endif %}">
+                {% if field.field.widget.input_type == 'checkbox' %}
+                    <label class="form-check-label">{{ field }} {{ field.label }}</label>
+                {% else %}
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                {% endif %}
+                {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+                {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            {% endfor %}
+            {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+            <button class="btn btn-primary" type="submit"><i class="bi bi-stars"></i> Generate draft lesson</button>
+        </form>
+    </section>
+
+    <aside class="detail-sidebar">
+        <section class="panel action-panel">
+            <span class="eyebrow">WHAT GETS CREATED</span>
+            <h2>Draft package</h2>
+            <ul class="diagnostic-list quality-list">
+                <li class="diagnostic diagnostic--ready">Beginner lesson fields</li>
+                <li class="diagnostic diagnostic--ready">Explanation, code, output, and tip blocks</li>
+                <li class="diagnostic diagnostic--ready">SEO title and description draft</li>
+                <li class="diagnostic diagnostic--ready">Optional structured quiz</li>
+                <li class="diagnostic diagnostic--ready">Optional code challenge with test case</li>
+            </ul>
+            <p>This workflow creates a strong first draft only. Review every code example, output, quiz answer, test case, and publishing status before using it publicly.</p>
+        </section>
+        <section class="panel action-panel">
+            <span class="eyebrow">GOOD IDEAS TO TRY</span>
+            <h2>Starter topics</h2>
+            <p>Python variables, for loops, lists, functions, if statements, strings, dictionaries, calculating a total price, or debugging a NameError.</p>
+        </section>
+    </aside>
+</div>
+{% endblock %}
