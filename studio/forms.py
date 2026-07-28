@@ -4,6 +4,7 @@ from django import forms
 from django.utils import timezone
 
 from .services.recommendation_tuning_presets import PRESET_CHOICES
+from .services.experiment_decision_tuning_presets import DECISION_PRESET_CHOICES
 
 from .models import (
     BrandProfile,
@@ -19,7 +20,11 @@ from .models import (
     ResourceCTA,
     RecommendationTuning,
     ExperimentDecisionTuning,
+    ExperimentDecisionTuningChangeLog,
     RecommendationTuningChangeLog,
+    RecommendationTuningExperimentSnapshot,
+    ExperimentDecisionTuningExperimentSnapshot,
+    ExperimentDecisionTuningSnapshotComparisonReport,
     LessonBlock,
     NewsletterSubscriber,
     NewsletterCampaign,
@@ -56,6 +61,12 @@ class RecommendationTuningExperimentSnapshotForm(forms.Form):
                 field.widget.attrs.setdefault("class", "form-select")
             else:
                 field.widget.attrs.setdefault("class", "form-control")
+
+
+class ExperimentDecisionTuningExperimentSnapshotForm(RecommendationTuningExperimentSnapshotForm):
+    """Same before/after window inputs, scoped to decision-rule experiments."""
+
+
 
 
 class StyledModelForm(forms.ModelForm):
@@ -189,6 +200,28 @@ class RecommendationTuningExperimentOutcomeForm(StyledModelForm):
             "experiment_notes": "Summarize what happened and the decision you made.",
         }
 
+
+
+class ExperimentDecisionTuningExperimentOutcomeForm(StyledModelForm):
+    class Meta:
+        model = ExperimentDecisionTuningChangeLog
+        fields = (
+            "experiment_label",
+            "experiment_status",
+            "experiment_outcome",
+            "experiment_notes",
+        )
+        widgets = {
+            "experiment_notes": forms.Textarea(attrs={"rows": 3}),
+        }
+        help_texts = {
+            "experiment_label": "Name the decision-rule test so it can be reviewed later.",
+            "experiment_status": "Mark whether the preset/rule experiment is still running, should be kept, or should be rolled back.",
+            "experiment_outcome": "Record the result once enough performance data is available.",
+            "experiment_notes": "Summarize what happened and what decision you made.",
+        }
+
+
 class RecommendationTuningSimulationForm(forms.Form):
     resource = forms.ModelChoiceField(
         queryset=LearningResource.objects.all().order_by("title"),
@@ -218,7 +251,142 @@ class RecommendationTuningSimulationForm(forms.Form):
 
 
 
+class ExperimentDecisionTuningSimulationForm(forms.Form):
+    snapshot = forms.ModelChoiceField(
+        queryset=ExperimentDecisionTuningExperimentSnapshot.objects.none(),
+        required=False,
+        label="Experiment snapshot",
+        help_text="Choose a saved before/after snapshot to compare decision-rule presets against.",
+    )
+    preset_keys = forms.MultipleChoiceField(
+        choices=DECISION_PRESET_CHOICES,
+        required=False,
+        label="Decision-rule presets to compare",
+        help_text="Leave blank to compare every decision-rule preset against the active rules.",
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["snapshot"].queryset = ExperimentDecisionTuningExperimentSnapshot.objects.select_related("change_log").order_by("-generated_at", "-pk")
+        self.fields["snapshot"].widget.attrs.setdefault("class", "form-select")
+
+
+class ExperimentDecisionTuningExperimentSnapshotComparisonForm(forms.Form):
+    snapshots = forms.ModelMultipleChoiceField(
+        queryset=ExperimentDecisionTuningExperimentSnapshot.objects.none(),
+        required=False,
+        label="Snapshots to compare",
+        help_text="Choose two to six decision-rule snapshots to compare side by side. Leave blank to compare the latest three.",
+        widget=forms.CheckboxSelectMultiple,
+    )
+    preset_keys = forms.MultipleChoiceField(
+        choices=DECISION_PRESET_CHOICES,
+        required=False,
+        label="Decision-rule presets to include",
+        help_text="Optional: compare how each selected preset would judge each snapshot. The active rules are always included.",
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["snapshots"].queryset = ExperimentDecisionTuningExperimentSnapshot.objects.select_related("change_log").order_by("-generated_at", "-pk")
+
+    def clean_snapshots(self):
+        snapshots = list(self.cleaned_data.get("snapshots") or [])
+        if len(snapshots) > 6:
+            raise forms.ValidationError("Choose no more than six snapshots for one comparison.")
+        return snapshots
+
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportForm(StyledModelForm):
+    decision_status = forms.ChoiceField(
+        choices=ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.choices,
+        required=False,
+        initial=ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED,
+        label="Decision status",
+    )
+    preset_keys = forms.MultipleChoiceField(
+        choices=DECISION_PRESET_CHOICES,
+        required=False,
+        label="Decision-rule presets to include",
+        help_text="Optional preset profiles to compare against the active decision rules.",
+        widget=forms.CheckboxSelectMultiple,
+    )
+
+    class Meta:
+        model = ExperimentDecisionTuningSnapshotComparisonReport
+        fields = (
+            "title",
+            "description",
+            "snapshots",
+            "preset_keys",
+            "notes",
+            "decision_status",
+            "decision_summary",
+            "decision_notes",
+            "decision_owner",
+        )
+        widgets = {
+            "description": forms.Textarea(attrs={"rows": 3}),
+            "snapshots": forms.CheckboxSelectMultiple,
+            "notes": forms.Textarea(attrs={"rows": 4}),
+            "decision_summary": forms.TextInput(attrs={"placeholder": "Example: Keep these rules through the next two posting cycles."}),
+            "decision_notes": forms.Textarea(attrs={"rows": 4}),
+        }
+        help_texts = {
+            "snapshots": "Choose two to six saved decision-rule experiment snapshots for this report.",
+            "notes": "Add interpretation, decisions, follow-up actions, or context for later review.",
+            "decision_status": "Move this saved report from analysis into a decision state.",
+            "decision_summary": "One-sentence decision or next action for this comparison.",
+            "decision_notes": "Add rationale, watch criteria, rollback criteria, or follow-up tasks.",
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["snapshots"].queryset = ExperimentDecisionTuningExperimentSnapshot.objects.select_related("change_log").order_by("-generated_at", "-pk")
+
+    def clean_snapshots(self):
+        snapshots = list(self.cleaned_data.get("snapshots") or [])
+        if len(snapshots) < 1:
+            raise forms.ValidationError("Choose at least one snapshot for this saved report.")
+        if len(snapshots) > 6:
+            raise forms.ValidationError("Choose no more than six snapshots for one saved report.")
+        return snapshots
+
+    def clean_decision_status(self):
+        return self.cleaned_data.get("decision_status") or ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED
+
+
+
 class ExperimentDecisionTuningForm(StyledModelForm):
+    change_reason = forms.CharField(
+        required=False,
+        label="Reason for change",
+        help_text="Optional note explaining why these decision rules are being changed.",
+        widget=forms.Textarea(attrs={"rows": 2}),
+    )
+    experiment_label = forms.CharField(
+        required=False,
+        max_length=160,
+        label="Experiment label",
+        help_text="Optional name for this decision-rule test, such as August Lead Magnet Decision Test.",
+    )
+    experiment_status = forms.ChoiceField(
+        required=False,
+        choices=ExperimentDecisionTuningChangeLog.ExperimentStatus.choices,
+        initial=ExperimentDecisionTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+        label="Experiment status",
+        help_text="Use Running or Planned when this decision-rule change is part of an experiment.",
+    )
+    experiment_notes = forms.CharField(
+        required=False,
+        label="Experiment notes",
+        help_text="Optional hypothesis or success criteria for this decision-rule experiment.",
+        widget=forms.Textarea(attrs={"rows": 2}),
+    )
+
     class Meta:
         model = ExperimentDecisionTuning
         fields = (

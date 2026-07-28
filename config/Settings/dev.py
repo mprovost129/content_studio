@@ -15,12 +15,13 @@ INTERNAL_IPS = ['127.0.0.1']
 # Disable password validation in development for convenience
 AUTH_PASSWORD_VALIDATORS = []
 
-# The production architecture remains PostgreSQL. SQLite is an opt-in local
-# fallback for a single-user workstation when Docker/PostgreSQL is unavailable.
-if os.environ.get('USE_SQLITE', '').lower() in {'1', 'true', 'yes'}:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ['DB_NAME'],
+        'USER': os.environ['DB_USER'],
+        'PASSWORD': os.environ['DB_PASSWORD'],
+        'HOST': os.environ.get('DB_HOST', 'localhost'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
     }
+}

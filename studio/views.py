@@ -39,6 +39,11 @@ from .forms import (
     ResourceIdeaForm,
     RecommendationTuningForm,
     ExperimentDecisionTuningForm,
+    ExperimentDecisionTuningSimulationForm,
+    ExperimentDecisionTuningExperimentOutcomeForm,
+    ExperimentDecisionTuningExperimentSnapshotForm,
+    ExperimentDecisionTuningExperimentSnapshotComparisonForm,
+    ExperimentDecisionTuningSnapshotComparisonReportForm,
     RecommendationTuningExperimentOutcomeForm,
     RecommendationTuningSimulationForm,
     RecommendationTuningExperimentSnapshotForm,
@@ -77,6 +82,9 @@ from .models import (
     ResourceLessonConversionEvent,
     RecommendationTuning,
     ExperimentDecisionTuning,
+    ExperimentDecisionTuningChangeLog,
+    ExperimentDecisionTuningExperimentSnapshot,
+    ExperimentDecisionTuningSnapshotComparisonReport,
     RecommendationTuningChangeLog,
     RecommendationTuningExperimentSnapshot,
     ResourcePerformanceEvent,
@@ -103,6 +111,18 @@ from .services.recommendation_tuning_presets import (
     restore_tuning_snapshot,
     tuning_snapshot,
 )
+from .services.experiment_decision_tuning_history import (
+    create_decision_tuning_change_log,
+    decision_tuning_snapshot,
+    restore_decision_tuning_snapshot,
+)
+from .services.experiment_decision_tuning_presets import (
+    DECISION_PRESETS,
+    apply_decision_preset_to_active_tuning,
+    build_decision_tuning_from_preset_key,
+    decision_preset_rows,
+    get_decision_preset,
+)
 from .services.resource_recommendations import (
     attach_recommendation_feedback,
     build_resource_cta_recommendations,
@@ -124,10 +144,12 @@ from .services.website import (
 from .services.newsletter_imports import parse_newsletter_metrics
 from .services.experiment_snapshots import (
     create_experiment_snapshot,
+    create_decision_rule_experiment_snapshot,
     snapshot_section_rows,
 )
 from .services.experiment_decisions import (
     apply_decision_to_change_log,
+    apply_decision_to_decision_rule_change_log,
     recommend_experiment_decision,
 )
 from .services.provider_readiness import (
@@ -501,14 +523,693 @@ class ExperimentDecisionTuningUpdateView(StaffRequiredMixin, UpdateView):
     def get_object(self, queryset=None):
         return ExperimentDecisionTuning.get_active()
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["preset_rows"] = decision_preset_rows(self.get_object())
+        context["decision_presets"] = DECISION_PRESETS
+        return context
+
     def form_valid(self, form):
+        before = decision_tuning_snapshot(self.get_object())
+        response = super().form_valid(form)
+        create_decision_tuning_change_log(
+            self.object,
+            before=before,
+            action=ExperimentDecisionTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.request.user,
+            reason=form.cleaned_data.get("change_reason", ""),
+            request_path=self.request.path,
+            experiment_label=form.cleaned_data.get("experiment_label", ""),
+            experiment_status=form.cleaned_data.get("experiment_status") or ExperimentDecisionTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+            experiment_notes=form.cleaned_data.get("experiment_notes", ""),
+        )
         messages.success(self.request, "Experiment decision thresholds and weights saved.")
-        return super().form_valid(form)
+        return response
 
     def get_success_url(self):
         return reverse("studio:experiment-decision-tuning")
 
 
+@staff_required
+@require_POST
+def apply_experiment_decision_tuning_preset(request):
+    preset = get_decision_preset(request.POST.get("preset_key", ""))
+    if not preset:
+        messages.error(request, "Choose a valid decision-rule preset.")
+        return redirect("studio:experiment-decision-tuning")
+    apply_decision_preset_to_active_tuning(
+        preset,
+        changed_by=request.user,
+        reason=request.POST.get("change_reason", "") or "Applied experiment decision-rule preset.",
+        request_path=request.path,
+        experiment_label=request.POST.get("experiment_label", ""),
+        experiment_status=request.POST.get("experiment_status", "") or ExperimentDecisionTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+        experiment_notes=request.POST.get("experiment_notes", ""),
+    )
+    messages.success(request, f"Applied the {preset.name} decision-rule preset.")
+    next_url = request.POST.get("next") or reverse("studio:experiment-decision-tuning")
+    return redirect(next_url)
+
+
+class ExperimentDecisionTuningSimulationView(StaffRequiredMixin, FormView):
+    template_name = "studio/experiment_decision_tuning_simulation.html"
+    form_class = ExperimentDecisionTuningSimulationForm
+
+    def get_initial(self):
+        initial = super().get_initial()
+        first_snapshot = ExperimentDecisionTuningExperimentSnapshot.objects.order_by("-generated_at", "-pk").first()
+        if first_snapshot:
+            initial["snapshot"] = first_snapshot.pk
+        return initial
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        form = context.get("form")
+        if form and form.is_bound and form.is_valid():
+            snapshot = form.cleaned_data.get("snapshot")
+            selected_keys = form.cleaned_data.get("preset_keys") or [preset.key for preset in DECISION_PRESETS]
+        else:
+            raw_snapshot = form.initial.get("snapshot") if form else None
+            snapshot = ExperimentDecisionTuningExperimentSnapshot.objects.filter(pk=raw_snapshot).first() if raw_snapshot else None
+            selected_keys = [preset.key for preset in DECISION_PRESETS]
+
+        simulations = []
+        if snapshot:
+            active_tuning = ExperimentDecisionTuning.get_active()
+            simulations.append({
+                "name": f"Active: {active_tuning.name}",
+                "description": active_tuning.notes or "Current saved decision-rule profile.",
+                "preset_key": "active",
+                "is_active": True,
+                "recommendation": recommend_experiment_decision(snapshot, tuning=active_tuning),
+            })
+            for key in selected_keys:
+                preset = get_decision_preset(key)
+                if not preset:
+                    continue
+                simulated_tuning = build_decision_tuning_from_preset_key(key)
+                simulations.append({
+                    "name": preset.name,
+                    "description": preset.description,
+                    "preset_key": preset.key,
+                    "is_active": False,
+                    "recommendation": recommend_experiment_decision(snapshot, tuning=simulated_tuning),
+                })
+
+        context["snapshot"] = snapshot
+        context["simulations"] = simulations
+        context["decision_presets"] = DECISION_PRESETS
+        context["preset_rows"] = decision_preset_rows()
+        return context
+
+    def form_valid(self, form):
+        return self.render_to_response(self.get_context_data(form=form))
+
+
+class ExperimentDecisionTuningRollbackView(StaffRequiredMixin, DetailView):
+    model = ExperimentDecisionTuningChangeLog
+    template_name = "studio/experiment_decision_tuning_rollback.html"
+    context_object_name = "change_log"
+
+    def post(self, request, *args, **kwargs):
+        change_log = self.get_object()
+        snapshot = request.POST.get("snapshot", "before")
+        if snapshot not in {"before", "after"}:
+            messages.error(request, "Choose a valid decision-rule snapshot to restore.")
+            return redirect("studio:experiment-decision-tuning-rollback", pk=change_log.pk)
+        restore_decision_tuning_snapshot(
+            change_log,
+            snapshot=snapshot,
+            changed_by=request.user,
+            reason=request.POST.get("rollback_reason", ""),
+            request_path=request.path,
+        )
+        label = "before-change" if snapshot == "before" else "after-change"
+        messages.success(request, f"Restored the {label} decision-rule snapshot and logged the rollback.")
+        return redirect("studio:experiment-decision-tuning-history")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        active = ExperimentDecisionTuning.get_active()
+        active_snapshot = decision_tuning_snapshot(active)
+        context["active_tuning"] = active
+        context["active_snapshot"] = active_snapshot
+        context["tracked_fields"] = [
+            {"name": field, "active": active_snapshot.get(field), "before": self.object.before.get(field), "after": self.object.after.get(field)}
+            for field in active_snapshot.keys()
+        ]
+        return context
+
+
+class ExperimentDecisionTuningHistoryView(StaffRequiredMixin, ListView):
+    model = ExperimentDecisionTuningChangeLog
+    template_name = "studio/experiment_decision_tuning_history.html"
+    context_object_name = "change_logs"
+    paginate_by = 50
+
+    def get_queryset(self):
+        queryset = ExperimentDecisionTuningChangeLog.objects.select_related("tuning", "changed_by", "outcome_recorded_by")
+        action = self.request.GET.get("action", "")
+        status = self.request.GET.get("experiment_status", "")
+        outcome = self.request.GET.get("experiment_outcome", "")
+        label = self.request.GET.get("experiment_label", "").strip()
+        if action:
+            queryset = queryset.filter(action=action)
+        if status:
+            queryset = queryset.filter(experiment_status=status)
+        if outcome:
+            queryset = queryset.filter(experiment_outcome=outcome)
+        if label:
+            queryset = queryset.filter(experiment_label__icontains=label)
+        return queryset.order_by("-created_at", "-pk")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["actions"] = ExperimentDecisionTuningChangeLog.Action.choices
+        context["experiment_statuses"] = ExperimentDecisionTuningChangeLog.ExperimentStatus.choices
+        context["experiment_outcomes"] = ExperimentDecisionTuningChangeLog.ExperimentOutcome.choices
+        context["selected_action"] = self.request.GET.get("action", "")
+        context["selected_experiment_status"] = self.request.GET.get("experiment_status", "")
+        context["selected_experiment_outcome"] = self.request.GET.get("experiment_outcome", "")
+        context["selected_experiment_label"] = self.request.GET.get("experiment_label", "").strip()
+        context["latest_change"] = ExperimentDecisionTuningChangeLog.objects.order_by("-created_at", "-pk").first()
+        context["active_experiment_count"] = ExperimentDecisionTuningChangeLog.objects.exclude(
+            experiment_status=ExperimentDecisionTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT
+        ).filter(experiment_outcome=ExperimentDecisionTuningChangeLog.ExperimentOutcome.NOT_RECORDED).count()
+        context["completed_outcome_count"] = ExperimentDecisionTuningChangeLog.objects.exclude(
+            experiment_outcome=ExperimentDecisionTuningChangeLog.ExperimentOutcome.NOT_RECORDED
+        ).count()
+        context["total_changes"] = context.get("paginator").count if context.get("paginator") else len(context.get("change_logs", []))
+        return context
+
+
+class ExperimentDecisionTuningHistoryExportView(StaffRequiredMixin, ListView):
+    model = ExperimentDecisionTuningChangeLog
+
+    def get(self, request, *args, **kwargs):
+        queryset = ExperimentDecisionTuningChangeLog.objects.select_related("tuning", "changed_by", "outcome_recorded_by").order_by("-created_at", "-pk")
+        action = request.GET.get("action", "")
+        status = request.GET.get("experiment_status", "")
+        outcome = request.GET.get("experiment_outcome", "")
+        label = request.GET.get("experiment_label", "").strip()
+        if action:
+            queryset = queryset.filter(action=action)
+        if status:
+            queryset = queryset.filter(experiment_status=status)
+        if outcome:
+            queryset = queryset.filter(experiment_outcome=outcome)
+        if label:
+            queryset = queryset.filter(experiment_label__icontains=label)
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="experiment_decision_rule_change_history.csv"'
+        writer = csv.writer(response)
+        writer.writerow([
+            "created_at",
+            "action",
+            "decision_rules_profile",
+            "changed_by",
+            "preset_key",
+            "preset_name",
+            "changed_fields",
+            "experiment_label",
+            "experiment_status",
+            "experiment_outcome",
+            "experiment_notes",
+            "outcome_recorded_at",
+            "outcome_recorded_by",
+            "diff_json",
+            "reason",
+            "request_path",
+        ])
+        for log in queryset:
+            writer.writerow([
+                log.created_at.isoformat(),
+                log.get_action_display(),
+                log.tuning.name if log.tuning_id else "",
+                getattr(log.changed_by, "email", "") or "",
+                log.preset_key,
+                log.preset_name,
+                log.changed_field_count,
+                log.experiment_label,
+                log.get_experiment_status_display(),
+                log.get_experiment_outcome_display(),
+                log.experiment_notes,
+                log.outcome_recorded_at.isoformat() if log.outcome_recorded_at else "",
+                getattr(log.outcome_recorded_by, "email", "") or "",
+                json.dumps(log.diff, sort_keys=True),
+                log.reason,
+                log.request_path,
+            ])
+        return response
+
+
+class ExperimentDecisionTuningExperimentOutcomeView(StaffRequiredMixin, UpdateView):
+    model = ExperimentDecisionTuningChangeLog
+    form_class = ExperimentDecisionTuningExperimentOutcomeForm
+    template_name = "studio/experiment_decision_tuning_experiment_form.html"
+    context_object_name = "change_log"
+
+    def form_valid(self, form):
+        self.object = form.save(commit=False)
+        self.object.outcome_recorded_at = timezone.now()
+        self.object.outcome_recorded_by = self.request.user if self.request.user.is_authenticated else None
+        self.object.save(update_fields=[
+            "experiment_label",
+            "experiment_status",
+            "experiment_outcome",
+            "experiment_notes",
+            "outcome_recorded_at",
+            "outcome_recorded_by",
+            "updated_at",
+        ])
+        messages.success(self.request, "Decision-rule experiment outcome saved.")
+        return redirect("studio:experiment-decision-tuning-history")
+
+    def get_success_url(self):
+        return reverse("studio:experiment-decision-tuning-history")
+
+
+class ExperimentDecisionTuningExperimentSnapshotListView(StaffRequiredMixin, ListView):
+    model = ExperimentDecisionTuningExperimentSnapshot
+    template_name = "studio/experiment_decision_tuning_experiment_snapshots.html"
+    context_object_name = "snapshots"
+    paginate_by = 30
+
+    def get_queryset(self):
+        queryset = ExperimentDecisionTuningExperimentSnapshot.objects.select_related(
+            "change_log", "change_log__tuning", "generated_by"
+        )
+        label = self.request.GET.get("experiment_label", "").strip()
+        window_days = self.request.GET.get("window_days", "").strip()
+        if label:
+            queryset = queryset.filter(change_log__experiment_label__icontains=label)
+        if window_days.isdigit():
+            queryset = queryset.filter(window_days=int(window_days))
+        return queryset.order_by("-generated_at", "-pk")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["selected_experiment_label"] = self.request.GET.get("experiment_label", "").strip()
+        context["selected_window_days"] = self.request.GET.get("window_days", "").strip()
+        context["window_choices"] = [7, 14, 30, 60]
+        context["snapshot_count"] = context.get("paginator").count if context.get("paginator") else len(context.get("snapshots", []))
+        context["latest_snapshot"] = ExperimentDecisionTuningExperimentSnapshot.objects.order_by("-generated_at").first()
+        return context
+
+
+class ExperimentDecisionTuningExperimentSnapshotCreateView(StaffRequiredMixin, DetailView):
+    model = ExperimentDecisionTuningChangeLog
+    template_name = "studio/experiment_decision_tuning_experiment_snapshot_form.html"
+    context_object_name = "change_log"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["form"] = kwargs.get("form") or ExperimentDecisionTuningExperimentSnapshotForm()
+        context["existing_snapshots"] = self.object.performance_snapshots.select_related("generated_by")[:10]
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        form = ExperimentDecisionTuningExperimentSnapshotForm(request.POST)
+        if not form.is_valid():
+            return self.render_to_response(self.get_context_data(form=form))
+        snapshot = create_decision_rule_experiment_snapshot(
+            change_log=self.object,
+            window_days=form.cleaned_data["window_days"],
+            generated_by=request.user if request.user.is_authenticated else None,
+            notes=form.cleaned_data.get("notes", ""),
+        )
+        messages.success(request, "Decision-rule experiment performance snapshot created.")
+        return redirect("studio:experiment-decision-tuning-experiment-snapshot-detail", pk=snapshot.pk)
+
+
+class ExperimentDecisionTuningExperimentSnapshotDetailView(StaffRequiredMixin, DetailView):
+    model = ExperimentDecisionTuningExperimentSnapshot
+    template_name = "studio/experiment_decision_tuning_experiment_snapshot_detail.html"
+    context_object_name = "snapshot"
+
+    def get_queryset(self):
+        return ExperimentDecisionTuningExperimentSnapshot.objects.select_related(
+            "change_log", "change_log__tuning", "generated_by"
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["metric_rows"] = snapshot_section_rows(self.object)
+        context["sections"] = _group_snapshot_rows_by_section(context["metric_rows"])
+        context["decision_recommendation"] = recommend_experiment_decision(self.object)
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        action = request.POST.get("action")
+        if action != "apply_decision_recommendation":
+            messages.error(request, "Unknown snapshot action.")
+            return redirect("studio:experiment-decision-tuning-experiment-snapshot-detail", pk=self.object.pk)
+        apply_decision_to_decision_rule_change_log(
+            snapshot=self.object,
+            user=request.user if request.user.is_authenticated else None,
+            note=request.POST.get("decision_note", "").strip(),
+        )
+        messages.success(request, "Decision recommendation recorded on the decision-rule experiment.")
+        return redirect("studio:experiment-decision-tuning-experiment-snapshot-detail", pk=self.object.pk)
+
+
+class ExperimentDecisionTuningExperimentSnapshotExportView(StaffRequiredMixin, DetailView):
+    model = ExperimentDecisionTuningExperimentSnapshot
+
+    def get(self, request, *args, **kwargs):
+        snapshot = self.get_object()
+        filename = f"code-with-michael-decision-rule-experiment-snapshot-{snapshot.pk}.csv"
+        response = _csv_response(filename)
+        writer = csv.writer(response)
+        writer.writerow([
+            "experiment_label",
+            "generated_at",
+            "window_days",
+            "before_start",
+            "before_end",
+            "after_start",
+            "after_end",
+            "section",
+            "metric",
+            "before",
+            "after",
+            "change",
+            "percent_change",
+        ])
+        for row in snapshot_section_rows(snapshot):
+            writer.writerow([
+                snapshot.experiment_label,
+                snapshot.generated_at.isoformat(),
+                snapshot.window_days,
+                snapshot.before_start.isoformat(),
+                snapshot.before_end.isoformat(),
+                snapshot.after_start.isoformat(),
+                snapshot.after_end.isoformat(),
+                row["section_label"],
+                row["metric_label"],
+                row["before"],
+                row["after"],
+                row["change"],
+                row["pct"] if row["pct"] is not None else "",
+            ])
+        return response
+
+
+
+
+class ExperimentDecisionTuningExperimentSnapshotCompareView(StaffRequiredMixin, FormView):
+    template_name = "studio/experiment_decision_tuning_experiment_snapshot_compare.html"
+    form_class = ExperimentDecisionTuningExperimentSnapshotComparisonForm
+
+    def get_initial(self):
+        initial = super().get_initial()
+        latest = ExperimentDecisionTuningExperimentSnapshot.objects.order_by("-generated_at", "-pk")[:3]
+        initial["snapshots"] = [snapshot.pk for snapshot in latest]
+        return initial
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        if self.request.method == "GET" and self.request.GET:
+            kwargs["data"] = self.request.GET
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        form = context["form"]
+        if self.request.GET and not form.is_valid():
+            snapshots = []
+            preset_keys = []
+        else:
+            snapshots = _selected_decision_rule_snapshots(form)
+            preset_keys = form.cleaned_data.get("preset_keys", []) if form.is_valid() else []
+        comparison = _decision_rule_snapshot_comparison(snapshots, preset_keys=preset_keys)
+        context.update({
+            "comparison": comparison,
+            "comparison_charts": _decision_rule_snapshot_comparison_charts(comparison),
+            "snapshots": snapshots,
+            "selected_count": len(snapshots),
+            "export_query": self.request.GET.urlencode(),
+        })
+        return context
+
+
+class ExperimentDecisionTuningExperimentSnapshotCompareExportView(StaffRequiredMixin, FormView):
+    form_class = ExperimentDecisionTuningExperimentSnapshotComparisonForm
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["data"] = self.request.GET or None
+        return kwargs
+
+    def get(self, request, *args, **kwargs):
+        form = self.get_form()
+        if request.GET and not form.is_valid():
+            snapshots = []
+            preset_keys = []
+        else:
+            snapshots = _selected_decision_rule_snapshots(form)
+            preset_keys = form.cleaned_data.get("preset_keys", []) if form.is_valid() else []
+        comparison = _decision_rule_snapshot_comparison(snapshots, preset_keys=preset_keys)
+        response = _csv_response("code-with-michael-decision-rule-snapshot-comparison.csv")
+        writer = csv.writer(response)
+
+        writer.writerow(["Summary comparison"])
+        writer.writerow(["metric"] + [f"{card['snapshot'].experiment_label} ({card['snapshot'].window_days}d)" for card in comparison["snapshot_cards"]])
+        for row in comparison["summary_rows"]:
+            writer.writerow([row["label"]] + [cell["change"] for cell in row["cells"]])
+
+        writer.writerow([])
+        writer.writerow(["Decision recommendations"])
+        writer.writerow(["snapshot", "window_days", "rules_profile", "recommendation", "confidence", "score", "summary"])
+        for card in comparison["snapshot_cards"]:
+            for rec_row in card["recommendations"]:
+                rec = rec_row["recommendation"]
+                writer.writerow([
+                    card["snapshot"].experiment_label,
+                    card["snapshot"].window_days,
+                    rec_row["profile"]["label"],
+                    rec.label,
+                    rec.confidence,
+                    rec.score,
+                    rec.summary,
+                ])
+
+        writer.writerow([])
+        writer.writerow(["Metric comparison"])
+        writer.writerow(["section", "metric"] + [f"{card['snapshot'].experiment_label} change" for card in comparison["snapshot_cards"]])
+        for row in comparison["metric_rows"]:
+            writer.writerow([row["section_label"], row["metric_label"]] + [cell["change"] for cell in row["cells"]])
+
+        charts = _decision_rule_snapshot_comparison_charts(comparison)
+        writer.writerow([])
+        writer.writerow(["Chart data - decision counts"])
+        writer.writerow(["recommendation", "count"])
+        for row in charts["decision_count_chart"]:
+            writer.writerow([row["label"], row["count"]])
+
+        writer.writerow([])
+        writer.writerow(["Chart data - top metric deltas"])
+        writer.writerow(["section", "metric"] + [f"{card['snapshot'].experiment_label} change" for card in comparison["snapshot_cards"]])
+        for row in charts["metric_delta_chart"]:
+            writer.writerow([row["section_label"], row["metric_label"]] + [cell["display"] for cell in row["bars"]])
+        return response
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportListView(StaffRequiredMixin, ListView):
+    model = ExperimentDecisionTuningSnapshotComparisonReport
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_reports.html"
+    context_object_name = "reports"
+
+    def get_queryset(self):
+        qs = (
+            ExperimentDecisionTuningSnapshotComparisonReport.objects
+            .prefetch_related("snapshots")
+            .select_related("created_by", "updated_by", "decision_owner", "decision_recorded_by")
+        )
+        q = self.request.GET.get("q", "").strip()
+        if q:
+            qs = qs.filter(
+                Q(title__icontains=q)
+                | Q(description__icontains=q)
+                | Q(notes__icontains=q)
+                | Q(decision_summary__icontains=q)
+                | Q(decision_notes__icontains=q)
+            )
+        decision_status = self.request.GET.get("decision_status", "").strip()
+        if decision_status:
+            qs = qs.filter(decision_status=decision_status)
+        return qs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["query"] = self.request.GET.get("q", "").strip()
+        context["decision_status"] = self.request.GET.get("decision_status", "").strip()
+        context["decision_status_choices"] = ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.choices
+        context["report_count"] = context["reports"].count() if hasattr(context["reports"], "count") else len(context["reports"])
+        return context
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportCreateView(StaffRequiredMixin, CreateView):
+    model = ExperimentDecisionTuningSnapshotComparisonReport
+    form_class = ExperimentDecisionTuningSnapshotComparisonReportForm
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_form.html"
+
+    def get_initial(self):
+        initial = super().get_initial()
+        snapshot_ids = self.request.GET.getlist("snapshots")
+        if not snapshot_ids:
+            snapshot_ids = [str(pk) for pk in ExperimentDecisionTuningExperimentSnapshot.objects.order_by("-generated_at", "-pk").values_list("pk", flat=True)[:3]]
+        initial["snapshots"] = snapshot_ids
+        initial["preset_keys"] = self.request.GET.getlist("preset_keys")
+        initial["title"] = self.request.GET.get("title", "Decision-rule snapshot comparison")
+        return initial
+
+    def form_valid(self, form):
+        form.instance.created_by = self.request.user if self.request.user.is_authenticated else None
+        form.instance.updated_by = self.request.user if self.request.user.is_authenticated else None
+        if form.instance.has_recorded_decision:
+            form.instance.decision_recorded_by = self.request.user if self.request.user.is_authenticated else None
+            form.instance.decision_recorded_at = timezone.now()
+        messages.success(self.request, "Saved snapshot comparison report.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", kwargs={"pk": self.object.pk})
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportUpdateView(StaffRequiredMixin, UpdateView):
+    model = ExperimentDecisionTuningSnapshotComparisonReport
+    form_class = ExperimentDecisionTuningSnapshotComparisonReportForm
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_form.html"
+
+    def form_valid(self, form):
+        previous = self.get_object()
+        form.instance.updated_by = self.request.user if self.request.user.is_authenticated else None
+        decision_fields = ("decision_status", "decision_summary", "decision_notes", "decision_owner")
+        decision_changed = any(getattr(previous, field) != getattr(form.instance, field) for field in decision_fields)
+        if decision_changed and form.instance.has_recorded_decision:
+            form.instance.decision_recorded_by = self.request.user if self.request.user.is_authenticated else None
+            form.instance.decision_recorded_at = timezone.now()
+        elif form.instance.decision_status == ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED:
+            form.instance.decision_recorded_by = None
+            form.instance.decision_recorded_at = None
+        messages.success(self.request, "Updated snapshot comparison report.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", kwargs={"pk": self.object.pk})
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportDetailView(StaffRequiredMixin, DetailView):
+    model = ExperimentDecisionTuningSnapshotComparisonReport
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_detail.html"
+    context_object_name = "report"
+
+    def get_queryset(self):
+        return super().get_queryset().prefetch_related("snapshots__change_log").select_related("created_by", "updated_by", "decision_owner", "decision_recorded_by")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        snapshots = list(self.object.snapshots.select_related("change_log", "generated_by").order_by("-generated_at", "-pk"))
+        comparison = _decision_rule_snapshot_comparison(snapshots, preset_keys=self.object.preset_keys or [])
+        context["snapshots"] = snapshots
+        context["comparison"] = comparison
+        context["comparison_charts"] = _decision_rule_snapshot_comparison_charts(comparison)
+        return context
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportPrintView(ExperimentDecisionTuningSnapshotComparisonReportDetailView):
+    """Clean, standalone report view intended for browser printing or saving to PDF."""
+
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_print.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["generated_at"] = timezone.now()
+        context["print_summary_cards"] = _printable_decision_rule_report_summary(context["comparison"], context["comparison_charts"])
+        return context
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportDeleteView(StaffRequiredMixin, DeleteView):
+    model = ExperimentDecisionTuningSnapshotComparisonReport
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_confirm_delete.html"
+    success_url = reverse_lazy("studio:experiment-decision-tuning-snapshot-comparison-reports")
+
+    def form_valid(self, form):
+        messages.success(self.request, "Deleted saved snapshot comparison report.")
+        return super().form_valid(form)
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportExportView(StaffRequiredMixin, DetailView):
+    model = ExperimentDecisionTuningSnapshotComparisonReport
+
+    def get_queryset(self):
+        return super().get_queryset().prefetch_related("snapshots__change_log").select_related("decision_owner", "decision_recorded_by")
+
+    def get(self, request, *args, **kwargs):
+        report = self.get_object()
+        snapshots = list(report.snapshots.select_related("change_log", "generated_by").order_by("-generated_at", "-pk"))
+        comparison = _decision_rule_snapshot_comparison(snapshots, preset_keys=report.preset_keys or [])
+        safe_id = f"{report.pk}"
+        response = _csv_response(f"code-with-michael-saved-decision-rule-comparison-{safe_id}.csv")
+        writer = csv.writer(response)
+
+        writer.writerow(["Saved comparison report"] )
+        writer.writerow(["title", report.title])
+        writer.writerow(["description", report.description])
+        writer.writerow(["created_at", report.created_at.isoformat()])
+        writer.writerow(["updated_at", report.updated_at.isoformat()])
+        writer.writerow(["notes", report.notes])
+        writer.writerow(["decision_status", report.get_decision_status_display()])
+        writer.writerow(["decision_summary", report.decision_summary])
+        writer.writerow(["decision_notes", report.decision_notes])
+        writer.writerow(["decision_owner", report.decision_owner.get_full_name() or report.decision_owner.email if report.decision_owner else ""])
+        writer.writerow(["decision_recorded_by", report.decision_recorded_by.get_full_name() or report.decision_recorded_by.email if report.decision_recorded_by else ""])
+        writer.writerow(["decision_recorded_at", report.decision_recorded_at.isoformat() if report.decision_recorded_at else ""])
+
+        writer.writerow([])
+        writer.writerow(["Summary comparison"])
+        writer.writerow(["metric"] + [f"{card['snapshot'].experiment_label} ({card['snapshot'].window_days}d)" for card in comparison["snapshot_cards"]])
+        for row in comparison["summary_rows"]:
+            writer.writerow([row["label"]] + [cell["change"] for cell in row["cells"]])
+
+        writer.writerow([])
+        writer.writerow(["Decision recommendations"])
+        writer.writerow(["snapshot", "window_days", "rules_profile", "recommendation", "confidence", "score", "summary"])
+        for card in comparison["snapshot_cards"]:
+            for rec_row in card["recommendations"]:
+                rec = rec_row["recommendation"]
+                writer.writerow([
+                    card["snapshot"].experiment_label,
+                    card["snapshot"].window_days,
+                    rec_row["profile"]["label"],
+                    rec.label,
+                    rec.confidence,
+                    rec.score,
+                    rec.summary,
+                ])
+
+        writer.writerow([])
+        writer.writerow(["Metric comparison"])
+        writer.writerow(["section", "metric"] + [f"{card['snapshot'].experiment_label} change" for card in comparison["snapshot_cards"]])
+        for row in comparison["metric_rows"]:
+            writer.writerow([row["section_label"], row["metric_label"]] + [cell["change"] for cell in row["cells"]])
+
+        charts = _decision_rule_snapshot_comparison_charts(comparison)
+        writer.writerow([])
+        writer.writerow(["Chart data - decision counts"])
+        writer.writerow(["recommendation", "count"])
+        for row in charts["decision_count_chart"]:
+            writer.writerow([row["label"], row["count"]])
+
+        writer.writerow([])
+        writer.writerow(["Chart data - top metric deltas"])
+        writer.writerow(["section", "metric"] + [f"{card['snapshot'].experiment_label} change" for card in comparison["snapshot_cards"]])
+        for row in charts["metric_delta_chart"]:
+            writer.writerow([row["section_label"], row["metric_label"]] + [cell["display"] for cell in row["bars"]])
+        return response
 
 
 class RecommendationTuningSimulationView(StaffRequiredMixin, FormView):
@@ -895,6 +1596,245 @@ def _group_snapshot_rows_by_section(rows):
         if key not in {"social", "resources", "newsletter", "ctas", "conversions"}:
             sections.append(section)
     return sections
+
+
+def _selected_decision_rule_snapshots(form):
+    if form.is_valid() and form.cleaned_data.get("snapshots"):
+        return list(form.cleaned_data["snapshots"])
+    return list(ExperimentDecisionTuningExperimentSnapshot.objects.select_related("change_log", "generated_by").order_by("-generated_at", "-pk")[:3])
+
+
+def _decision_rule_snapshot_comparison(snapshots, preset_keys=None):
+    active_tuning = ExperimentDecisionTuning.get_active()
+    profiles = [{"key": "active", "label": f"Active: {active_tuning.name}", "tuning": active_tuning}]
+    for key in preset_keys or []:
+        try:
+            preset = get_decision_preset(key)
+            profiles.append({"key": key, "label": preset.name, "tuning": build_decision_tuning_from_preset_key(key)})
+        except KeyError:
+            continue
+
+    metric_index = {}
+    snapshot_cards = []
+    for snapshot in snapshots:
+        rows = snapshot_section_rows(snapshot)
+        row_lookup = {}
+        for row in rows:
+            metric_key = f"{row['section_key']}::{row['metric_key']}"
+            metric_index.setdefault(metric_key, {
+                "section_key": row["section_key"],
+                "section_label": row["section_label"],
+                "metric_key": row["metric_key"],
+                "metric_label": row["metric_label"],
+                "is_percent_metric": row["is_percent_metric"],
+            })
+            row_lookup[metric_key] = row
+        recommendations = []
+        for profile in profiles:
+            recommendations.append({
+                "profile": profile,
+                "recommendation": recommend_experiment_decision(snapshot, tuning=profile["tuning"]),
+            })
+        snapshot_cards.append({
+            "snapshot": snapshot,
+            "rows": row_lookup,
+            "recommendations": recommendations,
+        })
+
+    metric_rows = []
+    preferred = ["social", "resources", "newsletter", "ctas", "conversions"]
+    def sort_key(item):
+        key, meta = item
+        try:
+            section_order = preferred.index(meta["section_key"])
+        except ValueError:
+            section_order = len(preferred)
+        return (section_order, meta["metric_label"])
+
+    for metric_key, meta in sorted(metric_index.items(), key=sort_key):
+        cells = []
+        for card in snapshot_cards:
+            row = card["rows"].get(metric_key, {})
+            cells.append({
+                "snapshot": card["snapshot"],
+                "before": row.get("before"),
+                "after": row.get("after"),
+                "change": row.get("change"),
+                "pct": row.get("pct"),
+            })
+        metric_rows.append({**meta, "cells": cells})
+
+    summary_keys = [
+        ("primary_social_delta", "Follower growth"),
+        ("primary_resource_delta", "Resource downloads"),
+        ("primary_newsletter_delta", "Newsletter clicks"),
+        ("primary_cta_delta", "CTA clicks"),
+        ("primary_conversion_delta", "Learner conversions"),
+    ]
+    summary_rows = []
+    for key, label in summary_keys:
+        summary_rows.append({
+            "key": key,
+            "label": label,
+            "cells": [
+                {
+                    "snapshot": card["snapshot"],
+                    "change": (card["snapshot"].summary or {}).get(key, {}).get("change", 0),
+                    "pct": (card["snapshot"].summary or {}).get(key, {}).get("pct"),
+                }
+                for card in snapshot_cards
+            ],
+        })
+
+    return {
+        "profiles": profiles,
+        "snapshot_cards": snapshot_cards,
+        "metric_rows": metric_rows,
+        "summary_rows": summary_rows,
+    }
+
+
+
+def _coerce_chart_number(value):
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _chart_tone(value):
+    value = _coerce_chart_number(value)
+    if value > 0:
+        return "positive"
+    if value < 0:
+        return "negative"
+    return "neutral"
+
+
+def _chart_width(value, maximum):
+    value = abs(_coerce_chart_number(value))
+    maximum = abs(_coerce_chart_number(maximum))
+    if maximum <= 0:
+        return 2
+    return max(4, min(100, round((value / maximum) * 100)))
+
+
+def _decision_rule_snapshot_comparison_charts(comparison):
+    """Build lightweight chart data for visual saved-report and comparison views."""
+    snapshot_cards = comparison.get("snapshot_cards", [])
+    summary_rows = comparison.get("summary_rows", [])
+    metric_rows = comparison.get("metric_rows", [])
+
+    max_summary = max(
+        [abs(_coerce_chart_number(cell.get("change"))) for row in summary_rows for cell in row.get("cells", [])] or [0]
+    )
+    summary_chart = []
+    for row in summary_rows:
+        summary_chart.append({
+            "label": row.get("label", ""),
+            "bars": [
+                {
+                    "snapshot": cell.get("snapshot"),
+                    "label": getattr(cell.get("snapshot"), "experiment_label", "Snapshot"),
+                    "value": _coerce_chart_number(cell.get("change")),
+                    "display": cell.get("change", 0),
+                    "pct": cell.get("pct"),
+                    "width": _chart_width(cell.get("change"), max_summary),
+                    "tone": _chart_tone(cell.get("change")),
+                }
+                for cell in row.get("cells", [])
+            ],
+        })
+
+    score_values = [
+        abs(_coerce_chart_number(item["recommendation"].score))
+        for card in snapshot_cards
+        for item in card.get("recommendations", [])
+    ]
+    max_score = max(score_values or [0])
+    decision_score_chart = []
+    for card in snapshot_cards:
+        decision_score_chart.append({
+            "snapshot": card.get("snapshot"),
+            "label": getattr(card.get("snapshot"), "experiment_label", "Snapshot"),
+            "scores": [
+                {
+                    "profile": item["profile"],
+                    "recommendation": item["recommendation"],
+                    "score": _coerce_chart_number(item["recommendation"].score),
+                    "width": _chart_width(item["recommendation"].score, max_score),
+                    "tone": item["recommendation"].css_class,
+                }
+                for item in card.get("recommendations", [])
+            ],
+        })
+
+    ranked_metric_rows = sorted(
+        metric_rows,
+        key=lambda row: sum(abs(_coerce_chart_number(cell.get("change"))) for cell in row.get("cells", [])),
+        reverse=True,
+    )[:10]
+    max_metric = max(
+        [abs(_coerce_chart_number(cell.get("change"))) for row in ranked_metric_rows for cell in row.get("cells", [])] or [0]
+    )
+    metric_delta_chart = []
+    for row in ranked_metric_rows:
+        metric_delta_chart.append({
+            "section_label": row.get("section_label", ""),
+            "metric_label": row.get("metric_label", ""),
+            "is_percent_metric": row.get("is_percent_metric", False),
+            "bars": [
+                {
+                    "snapshot": cell.get("snapshot"),
+                    "label": getattr(cell.get("snapshot"), "experiment_label", "Snapshot"),
+                    "value": _coerce_chart_number(cell.get("change")),
+                    "display": cell.get("change", 0),
+                    "pct": cell.get("pct"),
+                    "width": _chart_width(cell.get("change"), max_metric),
+                    "tone": _chart_tone(cell.get("change")),
+                }
+                for cell in row.get("cells", [])
+            ],
+        })
+
+    decision_counts = {}
+    for card in snapshot_cards:
+        for item in card.get("recommendations", []):
+            label = item["recommendation"].label
+            css_class = item["recommendation"].css_class
+            if label not in decision_counts:
+                decision_counts[label] = {"label": label, "css_class": css_class, "count": 0}
+            decision_counts[label]["count"] += 1
+    max_decision_count = max([row["count"] for row in decision_counts.values()] or [0])
+    decision_count_chart = [
+        {**row, "width": _chart_width(row["count"], max_decision_count)}
+        for row in sorted(decision_counts.values(), key=lambda row: (-row["count"], row["label"]))
+    ]
+
+    return {
+        "summary_chart": summary_chart,
+        "decision_score_chart": decision_score_chart,
+        "metric_delta_chart": metric_delta_chart,
+        "decision_count_chart": decision_count_chart,
+    }
+
+
+def _printable_decision_rule_report_summary(comparison, charts):
+    """Build short report highlights for the printable saved-comparison view."""
+    snapshot_count = len(comparison.get("snapshot_cards", []))
+    profile_count = len(comparison.get("profiles", []))
+    top_metric = (charts.get("metric_delta_chart") or [None])[0]
+    top_metric_label = "No major metric movement"
+    if top_metric:
+        top_metric_label = f"{top_metric.get('section_label', '')}: {top_metric.get('metric_label', '')}".strip(": ")
+    top_decision = (charts.get("decision_count_chart") or [None])[0]
+    top_decision_label = top_decision.get("label") if top_decision else "No decision available"
+    return [
+        {"label": "Snapshots compared", "value": snapshot_count},
+        {"label": "Decision profiles", "value": profile_count},
+        {"label": "Most common recommendation", "value": top_decision_label},
+        {"label": "Largest movement", "value": top_metric_label},
+    ]
 
 
 class ContentCalendarView(StaffRequiredMixin, TemplateView):

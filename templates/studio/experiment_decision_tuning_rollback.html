@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Restore decision-rule snapshot{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">RECOMMENDATIONS</span>
+        <h1>Restore decision-rule snapshot</h1>
+        <p>Review the current active decision rules against the saved before/after snapshots before restoring anything.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-history' %}">Decision-rule history</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning' %}">Decision rules</a>
+    </div>
+</section>
+
+<section class="panel">
+    <h2>{{ change_log.get_action_display }} · {{ change_log.created_at|date:"M j, Y g:i A" }}</h2>
+    <p><strong>Changed by:</strong> {% if change_log.changed_by %}{{ change_log.changed_by.email }}{% else %}—{% endif %}</p>
+    <p><strong>Reason:</strong> {% if change_log.reason %}{{ change_log.reason }}{% else %}<span class="text-muted">No reason entered</span>{% endif %}</p>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Snapshot comparison</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Field</th><th>Current active</th><th>Before change</th><th>After change</th></tr></thead>
+            <tbody>
+                {% for row in tracked_fields %}
+                <tr>
+                    <td><code>{{ row.name }}</code></td>
+                    <td>{{ row.active }}</td>
+                    <td>{{ row.before }}</td>
+                    <td>{{ row.after }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel mt-4">
+    <h2>Restore a snapshot</h2>
+    <p class="text-muted">Restoring creates a new audit-log entry, so the rollback itself can be reviewed later.</p>
+    <form method="post" class="form-panel">
+        {% csrf_token %}
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label" for="snapshot">Snapshot to restore</label>
+                <select class="form-select" id="snapshot" name="snapshot">
+                    <option value="before">Before-change snapshot</option>
+                    <option value="after">After-change snapshot</option>
+                </select>
+            </div>
+            <div class="col-md-8">
+                <label class="form-label" for="rollback_reason">Rollback reason</label>
+                <textarea class="form-control" id="rollback_reason" name="rollback_reason" rows="2" placeholder="Why are you restoring this decision-rule configuration?"></textarea>
+            </div>
+        </div>
+        <div class="form-actions mt-3">
+            <button class="btn btn-danger" type="submit">Restore selected snapshot</button>
+            <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-history' %}">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

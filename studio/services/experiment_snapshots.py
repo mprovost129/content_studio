@@ -12,6 +12,8 @@ from django.utils import timezone
 from studio.models import (
     NewsletterCampaign,
     PublishingRecord,
+    ExperimentDecisionTuningChangeLog,
+    ExperimentDecisionTuningExperimentSnapshot,
     RecommendationTuningChangeLog,
     RecommendationTuningExperimentSnapshot,
     ResourceCTAClickEvent,
@@ -186,6 +188,18 @@ def build_snapshot_payload(change_log: RecommendationTuningChangeLog, window_day
 def create_experiment_snapshot(*, change_log: RecommendationTuningChangeLog, window_days: int = 14, generated_by=None, notes: str = "") -> RecommendationTuningExperimentSnapshot:
     payload = build_snapshot_payload(change_log, window_days)
     return RecommendationTuningExperimentSnapshot.objects.create(
+        change_log=change_log,
+        window_days=window_days,
+        generated_by=generated_by,
+        generated_at=timezone.now(),
+        notes=notes,
+        **payload,
+    )
+
+
+def create_decision_rule_experiment_snapshot(*, change_log: ExperimentDecisionTuningChangeLog, window_days: int = 14, generated_by=None, notes: str = "") -> ExperimentDecisionTuningExperimentSnapshot:
+    payload = build_snapshot_payload(change_log, window_days)
+    return ExperimentDecisionTuningExperimentSnapshot.objects.create(
         change_log=change_log,
         window_days=window_days,
         generated_by=generated_by,

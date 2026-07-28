@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Delete saved comparison{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">RECOMMENDATIONS</span>
+        <h1>Delete saved comparison?</h1>
+        <p>This removes the named report only. It does not delete the underlying experiment snapshots.</p>
+    </div>
+</section>
+<section class="panel mt-4">
+    <form method="post">
+        {% csrf_token %}
+        <p>Delete <strong>{{ object.title }}</strong>?</p>
+        <button class="btn btn-danger" type="submit">Delete report</button>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-detail' object.pk %}">Cancel</a>
+    </form>
+</section>
+{% endblock %}

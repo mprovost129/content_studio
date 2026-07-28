@@ -24,6 +24,9 @@ from .models import (
     ResourceLessonConversionEvent,
     RecommendationTuning,
     ExperimentDecisionTuning,
+    ExperimentDecisionTuningChangeLog,
+    ExperimentDecisionTuningExperimentSnapshot,
+    ExperimentDecisionTuningSnapshotComparisonReport,
     RecommendationTuningChangeLog,
     RecommendationTuningExperimentSnapshot,
     ResourcePerformanceEvent,
@@ -221,6 +224,54 @@ class ExperimentDecisionTuningAdmin(admin.ModelAdmin):
         ("Notes", {"fields": ("notes", "created_at", "updated_at")}),
     )
 
+
+
+
+
+@admin.register(ExperimentDecisionTuningChangeLog)
+class ExperimentDecisionTuningChangeLogAdmin(admin.ModelAdmin):
+    list_display = (
+        "created_at", "action", "preset_name", "experiment_label",
+        "experiment_status", "experiment_outcome", "tuning", "changed_by", "changed_field_count"
+    )
+    list_filter = ("action", "experiment_status", "experiment_outcome", "preset_name", "created_at")
+    search_fields = ("tuning__name", "changed_by__email", "preset_key", "preset_name", "experiment_label", "reason", "experiment_notes", "request_path")
+    readonly_fields = ("created_at", "updated_at", "changed_field_count", "before", "after", "diff", "outcome_recorded_at", "outcome_recorded_by")
+    fieldsets = (
+        ("Change", {"fields": ("tuning", "action", "changed_by", "preset_key", "preset_name", "reason", "request_path")}),
+        ("Experiment tracking", {"fields": ("experiment_label", "experiment_status", "experiment_outcome", "experiment_notes", "outcome_recorded_at", "outcome_recorded_by")}),
+        ("Snapshots", {"fields": ("changed_field_count", "before", "after", "diff")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+
+@admin.register(ExperimentDecisionTuningExperimentSnapshot)
+class ExperimentDecisionTuningExperimentSnapshotAdmin(admin.ModelAdmin):
+    list_display = ("experiment_label", "window_days", "generated_at", "generated_by")
+    list_filter = ("window_days", "generated_at")
+    search_fields = ("change_log__experiment_label", "change_log__preset_name", "notes")
+    readonly_fields = ("generated_at", "created_at", "updated_at", "before_metrics", "after_metrics", "deltas", "summary")
+    fieldsets = (
+        ("Experiment", {"fields": ("change_log", "window_days", "generated_by", "generated_at", "notes")}),
+        ("Windows", {"fields": ("before_start", "before_end", "after_start", "after_end")}),
+        ("Metrics", {"fields": ("summary", "before_metrics", "after_metrics", "deltas")}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+
+@admin.register(ExperimentDecisionTuningSnapshotComparisonReport)
+class ExperimentDecisionTuningSnapshotComparisonReportAdmin(admin.ModelAdmin):
+    list_display = ("title", "decision_status", "snapshot_count", "preset_count", "updated_at", "created_by")
+    list_filter = ("decision_status", "decision_recorded_at", "updated_at")
+    search_fields = ("title", "description", "notes", "decision_summary", "decision_notes", "created_by__email", "updated_by__email", "decision_owner__email")
+    readonly_fields = ("created_at", "updated_at", "snapshot_count", "preset_count", "decision_recorded_at", "decision_recorded_by")
+    filter_horizontal = ("snapshots",)
+    fieldsets = (
+        ("Report", {"fields": ("title", "description", "snapshots", "preset_keys", "notes")}),
+        ("Decision", {"fields": ("decision_status", "decision_summary", "decision_notes", "decision_owner", "decision_recorded_by", "decision_recorded_at")}),
+        ("Ownership", {"fields": ("created_by", "updated_by")}),
+        ("Metadata", {"fields": ("snapshot_count", "preset_count", "created_at", "updated_at")}),
+    )
 
 
 @admin.register(ResourceCTARecommendationFeedback)

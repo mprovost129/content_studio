@@ -1,5 +1,0 @@
-{% extends "base.html" %}
-{% block title %}Delete block{% endblock %}
-{% block content %}
-<section class="panel narrow-form"><span class="eyebrow">CONFIRM</span><h1>Delete this content block?</h1><p>{{ object.get_block_type_display }} from “{{ object.lesson }}” will be permanently removed.</p><form method="post">{% csrf_token %}<button class="btn btn-danger" type="submit">Delete block</button> <a class="btn btn-secondary" href="{{ object.lesson.get_absolute_url }}">Cancel</a></form></section>
-{% endblock %}

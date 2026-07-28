@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Saved decision-rule comparisons{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">RECOMMENDATIONS</span>
+        <h1>Saved snapshot comparison reports</h1>
+        <p>Revisit named multi-snapshot comparisons with annotations, selected decision-rule presets, and exportable results.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-primary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-create' %}">New saved report</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-experiment-snapshot-compare' %}">Compare snapshots</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-experiment-snapshots' %}">All snapshots</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-card"><span>Saved reports</span><strong>{{ report_count }}</strong></div>
+    <div class="stat-card"><span>Filter</span><strong>{{ decision_status|default:"All"|title }}</strong></div>
+</section>
+
+<section class="panel mt-4">
+    <form method="get" class="filter-bar">
+        <label>Search
+            <input type="search" name="q" value="{{ query }}" placeholder="August tests, lead magnets, Instagram...">
+        </label>
+        <label>Decision status
+            <select name="decision_status">
+                <option value="">All statuses</option>
+                {% for value,label in decision_status_choices %}
+                <option value="{{ value }}" {% if value == decision_status %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button class="btn btn-primary" type="submit">Filter</button>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-reports' %}">Reset</a>
+    </form>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Reports</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Report</th><th>Decision</th><th>Snapshots</th><th>Presets</th><th>Updated</th><th></th></tr>
+            </thead>
+            <tbody>
+                {% for report in reports %}
+                <tr>
+                    <td><strong>{{ report.title }}</strong><br><small>{{ report.description|default:"No description"|truncatechars:120 }}</small></td>
+                    <td><span class="badge badge-{{ report.decision_status_css }}">{{ report.get_decision_status_display }}</span><br><small>{{ report.decision_summary|default:"No decision summary"|truncatechars:90 }}</small></td>
+                    <td>{{ report.snapshot_count }}</td>
+                    <td>{{ report.preset_count }}</td>
+                    <td>{{ report.updated_at|date:"M j, Y g:i A" }}</td>
+                    <td>
+                        <a class="btn btn-secondary btn-sm" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-detail' report.pk %}">Open</a>
+                        <a class="btn btn-secondary btn-sm" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-update' report.pk %}">Edit</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6">No saved comparison reports yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

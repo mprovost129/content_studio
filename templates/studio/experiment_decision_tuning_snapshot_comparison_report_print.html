@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ report.title }} · Printable Report</title>
+    <style>
+        :root { --ink:#111827; --muted:#5b6473; --border:#d9dee8; --soft:#f5f7fb; --brand:#1d4ed8; --good:#15803d; --bad:#b91c1c; --neutral:#0369a1; }
+        * { box-sizing: border-box; }
+        body { margin: 0; color: var(--ink); background: #eef2f7; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.45; }
+        .report-shell { max-width: 1120px; margin: 28px auto; padding: 0 20px; }
+        .report-page { background: white; border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 20px 60px rgba(15,23,42,.12); overflow: hidden; }
+        .report-cover { padding: 42px 48px 32px; border-bottom: 1px solid var(--border); background: linear-gradient(135deg, #0f172a, #1e3a8a); color: white; }
+        .eyebrow { margin: 0 0 10px; letter-spacing: .14em; text-transform: uppercase; font-size: .78rem; opacity: .78; font-weight: 800; }
+        h1 { margin: 0; font-size: 2.15rem; line-height: 1.1; }
+        h2 { margin: 0 0 14px; font-size: 1.35rem; }
+        h3 { margin: 0 0 10px; font-size: 1rem; }
+        p { margin: 0 0 10px; }
+        .muted { color: var(--muted); }
+        .cover-meta { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 22px; font-size: .92rem; opacity: .9; }
+        .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .btn { display: inline-flex; align-items: center; justify-content: center; padding: 10px 14px; border-radius: 999px; text-decoration: none; border: 1px solid #cbd5e1; color: var(--ink); background: white; font-weight: 700; cursor: pointer; }
+        .btn-primary { background: var(--brand); border-color: var(--brand); color: white; }
+        .section { padding: 28px 48px; border-bottom: 1px solid var(--border); break-inside: avoid; }
+        .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+        .summary-card { padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--soft); }
+        .summary-card span { display: block; color: var(--muted); font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+        .summary-card strong { display: block; margin-top: 6px; font-size: 1.25rem; }
+        .chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+        .chart-card { border: 1px solid var(--border); border-radius: 14px; padding: 16px; background: #fff; break-inside: avoid; }
+        .chart-row { display: grid; gap: 6px; margin: 10px 0; }
+        .chart-label { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: .84rem; }
+        .chart-label strong { color: var(--ink); }
+        .chart-track { min-height: 12px; overflow: hidden; background: #e5e7eb; border-radius: 999px; }
+        .chart-fill { display: block; min-width: 4px; height: 12px; border-radius: 999px; background: #64748b; }
+        .positive, .keep { background: var(--good); }
+        .negative, .rollback { background: var(--bad); }
+        .neutral, .inconclusive { background: var(--neutral); }
+        table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+        th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+        th { background: var(--soft); font-size: .76rem; text-transform: uppercase; letter-spacing: .07em; }
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 999px; background: #e2e8f0; font-size: .78rem; font-weight: 800; }
+        .badge-keep { color: var(--good); background: #dcfce7; }
+        .badge-rollback { color: var(--bad); background: #fee2e2; }
+        .badge-inconclusive { color: var(--neutral); background: #e0f2fe; }
+        .notes { white-space: pre-wrap; }
+        .footer { padding: 18px 48px 32px; color: var(--muted); font-size: .82rem; }
+        @media print {
+            body { background: white; }
+            .report-shell { max-width: none; margin: 0; padding: 0; }
+            .report-page { border: 0; box-shadow: none; border-radius: 0; }
+            .toolbar { display: none; }
+            .section { padding: 22px 0; }
+            .report-cover { padding: 28px 0 24px; color: var(--ink); background: white; border-bottom: 2px solid var(--ink); }
+            .footer { padding: 16px 0 0; }
+            @page { margin: .6in; }
+        }
+        @media (max-width: 860px) { .summary-grid, .chart-grid { grid-template-columns: 1fr; } .section, .report-cover, .footer { padding-left: 24px; padding-right: 24px; } }
+    </style>
+</head>
+<body>
+<div class="report-shell">
+    <div class="toolbar">
+        <a class="btn" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-detail' report.pk %}">Back to Studio report</a>
+        <button class="btn btn-primary" onclick="window.print()">Print / Save as PDF</button>
+    </div>
+
+    <article class="report-page">
+        <header class="report-cover">
+            <p class="eyebrow">Code with Michael · Decision-Rule Comparison Report</p>
+            <h1>{{ report.title }}</h1>
+            <p style="margin-top: 14px; max-width: 760px;">{{ report.description|default:"Printable visual summary of saved decision-rule experiment snapshots." }}</p>
+            <div class="cover-meta">
+                <span>Generated {{ generated_at|date:"M j, Y g:i A" }}</span>
+                <span>{{ report.snapshot_count }} snapshot{{ report.snapshot_count|pluralize }}</span>
+                <span>{{ report.preset_count }} preset profile{{ report.preset_count|pluralize }}</span>
+                <span>Decision: {{ report.get_decision_status_display }}</span>
+                <span>Updated {{ report.updated_at|date:"M j, Y" }}</span>
+            </div>
+        </header>
+
+        <section class="section">
+            <h2>Executive summary</h2>
+            <div class="summary-grid">
+                {% for card in print_summary_cards %}
+                <div class="summary-card"><span>{{ card.label }}</span><strong>{{ card.value }}</strong></div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="section">
+            <h2>Report decision</h2>
+            <p><span class="badge badge-{{ report.decision_status_css }}">{{ report.get_decision_status_display }}</span></p>
+            {% if report.decision_summary %}<p><strong>{{ report.decision_summary }}</strong></p>{% endif %}
+            {% if report.decision_notes %}<p class="notes">{{ report.decision_notes }}</p>{% endif %}
+            <p class="muted">{% if report.decision_owner %}Owner: {{ report.decision_owner.get_full_name|default:report.decision_owner.email }} · {% endif %}{% if report.decision_recorded_at %}Recorded {{ report.decision_recorded_at|date:"M j, Y g:i A" }}{% else %}No decision has been recorded yet.{% endif %}</p>
+        </section>
+
+        {% if report.notes %}
+        <section class="section">
+            <h2>Report notes</h2>
+            <p class="notes">{{ report.notes }}</p>
+        </section>
+        {% endif %}
+
+        <section class="section">
+            <h2>Primary metric deltas</h2>
+            <div class="chart-grid">
+                {% for chart in comparison_charts.summary_chart %}
+                <div class="chart-card">
+                    <h3>{{ chart.label }}</h3>
+                    {% for bar in chart.bars %}
+                    <div class="chart-row">
+                        <div class="chart-label"><span>{{ bar.label }}</span><strong>{{ bar.display|default:"0" }}{% if bar.pct != None %} · {{ bar.pct }}%{% endif %}</strong></div>
+                        <div class="chart-track"><span class="chart-fill {{ bar.tone }}" style="width: {{ bar.width }}%"></span></div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% empty %}<p class="muted">No summary metrics available.</p>{% endfor %}
+            </div>
+        </section>
+
+        <section class="section">
+            <h2>Decision recommendation mix</h2>
+            <div class="chart-grid">
+                <div class="chart-card">
+                    {% for row in comparison_charts.decision_count_chart %}
+                    <div class="chart-row">
+                        <div class="chart-label"><span>{{ row.label }}</span><strong>{{ row.count }}</strong></div>
+                        <div class="chart-track"><span class="chart-fill {{ row.css_class }}" style="width: {{ row.width }}%"></span></div>
+                    </div>
+                    {% empty %}<p class="muted">No decisions available.</p>{% endfor %}
+                </div>
+                <div class="chart-card">
+                    <h3>Decision profiles included</h3>
+                    {% for profile in comparison.profiles %}
+                    <p><strong>{{ profile.label }}</strong></p>
+                    {% empty %}<p class="muted">No decision profiles available.</p>{% endfor %}
+                </div>
+            </div>
+        </section>
+
+        <section class="section">
+            <h2>Decision recommendation matrix</h2>
+            <table>
+                <thead><tr><th>Snapshot</th>{% for profile in comparison.profiles %}<th>{{ profile.label }}</th>{% endfor %}</tr></thead>
+                <tbody>
+                    {% for card in comparison.snapshot_cards %}
+                    <tr>
+                        <td><strong>{{ card.snapshot.experiment_label }}</strong><br><small>{{ card.snapshot.window_days }} day window</small></td>
+                        {% for item in card.recommendations %}
+                        <td><span class="badge badge-{{ item.recommendation.css_class }}">{{ item.recommendation.label }}</span><br><small>{{ item.recommendation.confidence }} confidence · score {{ item.recommendation.score }}</small><br><small>{{ item.recommendation.summary }}</small></td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <section class="section">
+            <h2>Largest metric movements</h2>
+            <div class="chart-grid">
+                {% for chart in comparison_charts.metric_delta_chart|slice:":6" %}
+                <div class="chart-card">
+                    <h3>{{ chart.section_label }} · {{ chart.metric_label }}</h3>
+                    {% for bar in chart.bars %}
+                    <div class="chart-row">
+                        <div class="chart-label"><span>{{ bar.label }}</span><strong>{{ bar.display|default:"0" }}{% if chart.is_percent_metric %} pts{% endif %}{% if bar.pct != None %} · {{ bar.pct }}%{% endif %}</strong></div>
+                        <div class="chart-track"><span class="chart-fill {{ bar.tone }}" style="width: {{ bar.width }}%"></span></div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% empty %}<p class="muted">No metric deltas available.</p>{% endfor %}
+            </div>
+        </section>
+
+        <section class="section">
+            <h2>Snapshot summary table</h2>
+            <table>
+                <thead><tr><th>Metric</th>{% for card in comparison.snapshot_cards %}<th>{{ card.snapshot.experiment_label }}<br><small>{{ card.snapshot.window_days }} days</small></th>{% endfor %}</tr></thead>
+                <tbody>
+                    {% for row in comparison.summary_rows %}
+                    <tr><td><strong>{{ row.label }}</strong></td>{% for cell in row.cells %}<td>{{ cell.change|default:"0" }}{% if cell.pct != None %}<br><small>{{ cell.pct }}%</small>{% endif %}</td>{% endfor %}</tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <section class="section">
+            <h2>Full metric comparison</h2>
+            <table>
+                <thead><tr><th>Area</th><th>Metric</th>{% for card in comparison.snapshot_cards %}<th>{{ card.snapshot.experiment_label }}<br><small>Before → after / change</small></th>{% endfor %}</tr></thead>
+                <tbody>
+                    {% for row in comparison.metric_rows %}
+                    <tr>
+                        <td>{{ row.section_label }}</td>
+                        <td><strong>{{ row.metric_label }}</strong></td>
+                        {% for cell in row.cells %}
+                        <td>{{ cell.before|default:"0" }}{% if row.is_percent_metric and cell.before != None %}%{% endif %} → {{ cell.after|default:"0" }}{% if row.is_percent_metric and cell.after != None %}%{% endif %}<br><small>Change: {{ cell.change|default:"0" }}{% if row.is_percent_metric %} pts{% endif %}{% if cell.pct != None %} · {{ cell.pct }}%{% endif %}</small></td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        <footer class="footer">
+            <p>Prepared in Code with Michael Content Studio. Use this printable page with your browser’s print dialog to save a clean PDF summary.</p>
+        </footer>
+    </article>
+</div>
+</body>
+</html>

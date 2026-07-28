@@ -1,5 +1,58 @@
 # Code with Michael Content Studio
 
+## Phase 48: Report-level decision status
+
+Phase 48 moves saved decision-rule snapshot comparison reports from analysis-only records into decision records. A saved report can now be marked as **No decision yet**, **Keep**, **Roll back**, **Watch**, or **Archived**, with an owner, summary, notes, recorded-by user, and recorded date.
+
+Updated private Studio behavior:
+
+- Saved comparison report forms now include a report-level decision section.
+- Saved report lists can be filtered by decision status.
+- Saved report detail pages show the current decision and rationale above the charts and tables.
+- Printable reports include the current decision so browser-generated PDFs can be shared as action records.
+- CSV exports include decision status, summary, notes, owner, recorded-by, and recorded-at values.
+
+New migration:
+
+- `studio/migrations/0033_comparison_report_decision_status.py`
+
+## Phase 47: Printable saved comparison reports
+
+Phase 47 adds clean, standalone printable report pages for saved decision-rule snapshot comparison reports. These pages keep the visual charts, executive summary, recommendation matrix, and metric tables, but remove the normal Studio chrome so the report can be shared in a meeting or saved as a browser-generated PDF.
+
+New private Studio route:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/reports/<id>/print/` — open a print-optimized visual report page.
+
+Printable report behavior:
+
+- Includes a branded Code with Michael cover section.
+- Shows generated date, snapshot count, preset profile count, and report update date.
+- Adds executive summary cards for snapshot count, decision profiles, most common recommendation, and largest movement.
+- Keeps the visual primary-delta charts, decision mix chart, decision matrix, largest metric movements, summary table, and full metric comparison.
+- Includes a built-in **Print / Save as PDF** button and print CSS for clean browser PDF exports.
+
+No database migration is required for this phase.
+
+## Phase 45: Saved decision-rule snapshot comparison reports
+
+Phase 45 adds reusable, named reports for decision-rule experiment snapshot comparisons. Staff can now save useful multi-snapshot comparisons, revisit them later, add annotations, include selected decision-rule presets, and export the saved comparison to CSV.
+
+New private Studio routes:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/reports/` — list saved comparison reports.
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/reports/new/` — create a saved report from selected snapshots and presets.
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/reports/<id>/` — review a saved report.
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/reports/<id>/edit/` — update report title, notes, snapshots, and preset selection.
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/reports/<id>/export/` — export a saved report to CSV.
+
+New model and migration:
+
+- `ExperimentDecisionTuningSnapshotComparisonReport`
+- `studio/migrations/0032_decision_rule_snapshot_comparison_reports.py`
+
+The saved report stores the selected snapshot set, selected decision-rule preset keys, description, and staff notes. The report detail page reuses the existing comparison engine so the active decision rules, selected presets, summary deltas, decision matrix, and full metric comparison stay current when opened later.
+
 ## Phase 36: Recommendation tuning experiment labels and outcomes
 
 Phase 36 adds experiment tracking to recommendation tuning changes. Staff can now label a tuning update or preset application as a named experiment, record a hypothesis or success criteria, update the outcome later, and filter/export tuning history by experiment status and result.
@@ -1017,3 +1070,89 @@ The decision-rules screen controls:
 - unsubscribe and bounce penalty weights
 
 Snapshot detail pages now show the active decision-rules profile, the rule thresholds used for that recommendation, and the top weighted metric contributions behind the decision score. This makes the recommendation explainable and tunable without editing Python code.
+
+
+### Phase 40: Decision-rule audit logging
+
+Experiment decision-rule tuning now has its own audit trail. Staff saves to the decision threshold/weight profile record before/after snapshots, changed fields, optional reason notes, and the staff user. The new history screen includes CSV export and rollback controls so previous decision-rule configurations can be restored safely.
+
+## Phase 41: Decision-rule presets and simulation
+
+Phase 41 adds preset profiles and a read-only simulation workflow for experiment decision rules. Staff can now compare how different keep / rollback / inconclusive rules would evaluate an existing experiment snapshot before changing the active profile.
+
+Added decision-rule presets:
+
+- **Aggressive Growth** — favors keep decisions when follower growth, clicks, and learner conversions improve.
+- **Conservative Quality** — requires stronger positive evidence and reacts more strongly to unsubscribes, bounces, or quality declines.
+- **Balanced Learning** — balances audience growth with lesson views, quiz attempts, challenge attempts, and completions.
+- **Lead Magnet Focus** — prioritizes PDF unlocks, PDF downloads, subscribers, and newsletter clicks.
+
+New routes:
+
+- `/studio/recommendations/tuning/decision-rules/simulation/`
+- `/studio/recommendations/tuning/decision-rules/presets/apply/`
+
+Preset applications are logged in the existing decision-rule audit log. The simulation screen is read-only and does not change active decision rules until a staff user explicitly applies a preset.
+
+No database migration is required for phase 41.
+
+## Phase 42: Decision-rule preset experiment labels and outcomes
+
+Phase 42 extends decision-rule presets into trackable experiments. When staff apply a preset such as Aggressive Growth, Conservative Quality, Balanced Learning, or Lead Magnet Focus, they can now add an experiment label and hypothesis directly from the decision-rules screen. Manual rule changes can also be labeled as experiments.
+
+Decision-rule change logs now store:
+
+- preset key and preset name
+- experiment label
+- experiment status
+- experiment outcome
+- experiment notes
+- outcome recorded timestamp
+- outcome recorded by
+
+New route:
+
+- `/studio/recommendations/tuning/decision-rules/history/<id>/experiment/`
+
+Decision-rule history now includes filters for action, experiment status, experiment outcome, and experiment label search. The CSV export includes all experiment fields so preset-based decision-rule tests can be reviewed outside the app.
+
+Database migration added:
+
+- `studio/migrations/0030_experiment_decision_rule_experiments.py`
+
+## Phase 43: Decision-rule experiment snapshots
+
+Phase 43 adds before/after performance snapshots for **decision-rule experiments**. This mirrors the existing recommendation-tuning experiment snapshot workflow, but ties the snapshot to `ExperimentDecisionTuningChangeLog` records created by manual rule edits, preset applications, and rollback restores.
+
+New routes:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/<id>/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/<id>/export/`
+- `/studio/recommendations/tuning/decision-rules/history/<id>/snapshot/`
+
+Snapshots compare 7, 14, 30, or 60 day windows before and after the decision-rule change timestamp. Metrics include social publishing performance, resource views/unlocks/downloads/subscribers, newsletter opens/clicks/unsubscribes/bounces, resource CTA clicks, and learner conversions.
+
+Each snapshot detail page uses the active experiment decision rules to recommend **keep changes**, **rollback recommended**, or **inconclusive**. Staff can record that recommendation directly onto the decision-rule experiment outcome or manually record a different outcome.
+
+Database migration added:
+
+- `studio/migrations/0031_experiment_decision_rule_snapshots.py`
+
+## Phase 44: Decision-rule snapshot comparison
+
+Phase 44 adds a side-by-side comparison workflow for decision-rule experiment snapshots. Staff can compare multiple saved before/after windows and optionally include decision-rule presets in the same view.
+
+New routes:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/compare/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/compare/export/`
+
+The comparison view includes:
+
+- Summary deltas for follower growth, resource downloads, newsletter clicks, CTA clicks, and learner conversions.
+- A decision recommendation matrix showing how the active rules and selected presets judge each snapshot.
+- Full metric comparison rows across social publishing, resource library, newsletter, resource CTA clicks, and resource-to-lesson conversions.
+- CSV export for summary comparisons, decision recommendations, and metric deltas.
+
+This makes it easier to compare multiple experiments or different time windows before deciding whether a decision-rule preset should be kept, rolled back, or marked inconclusive.

@@ -7,7 +7,7 @@ from typing import Any
 
 from django.utils import timezone
 
-from studio.models import ExperimentDecisionTuning, RecommendationTuningChangeLog, RecommendationTuningExperimentSnapshot
+from studio.models import ExperimentDecisionTuning, ExperimentDecisionTuningChangeLog, RecommendationTuningChangeLog, RecommendationTuningExperimentSnapshot, ExperimentDecisionTuningExperimentSnapshot
 
 
 @dataclass(frozen=True)
@@ -86,7 +86,7 @@ METRIC_LABELS = {
 }
 
 
-def _change(snapshot: RecommendationTuningExperimentSnapshot, section: str, metric: str) -> float:
+def _change(snapshot: RecommendationTuningExperimentSnapshot | ExperimentDecisionTuningExperimentSnapshot, section: str, metric: str) -> float:
     values = (snapshot.deltas or {}).get(section, {}).get(metric, {})
     raw = values.get("change")
     try:
@@ -106,7 +106,7 @@ def _metric_note(section: str, metric: str, change: float) -> str:
 
 
 def recommend_experiment_decision(
-    snapshot: RecommendationTuningExperimentSnapshot,
+    snapshot: RecommendationTuningExperimentSnapshot | ExperimentDecisionTuningExperimentSnapshot,
     tuning: ExperimentDecisionTuning | None = None,
 ) -> DecisionRecommendation:
     """Return a deterministic keep/rollback/inconclusive recommendation for a snapshot."""
@@ -226,12 +226,42 @@ def recommend_experiment_decision(
     )
 
 
-def apply_decision_to_change_log(*, snapshot: RecommendationTuningExperimentSnapshot, user=None, note: str = "") -> RecommendationTuningChangeLog:
+def apply_decision_to_change_log(*, snapshot: RecommendationTuningExperimentSnapshot | ExperimentDecisionTuningExperimentSnapshot, user=None, note: str = "") -> RecommendationTuningChangeLog:
     """Save the recommendation back to the change log as the recorded experiment outcome."""
     recommendation = recommend_experiment_decision(snapshot)
     change_log = snapshot.change_log
     recommendation_note = (
         f"Decision recommendation from snapshot #{snapshot.pk}: {recommendation.label} "
+        f"(confidence: {recommendation.confidence}, score: {recommendation.score}). {recommendation.summary}"
+    )
+    if note:
+        recommendation_note = f"{recommendation_note}\n\nStaff note: {note}"
+    if change_log.experiment_notes:
+        change_log.experiment_notes = f"{change_log.experiment_notes}\n\n{recommendation_note}"
+    else:
+        change_log.experiment_notes = recommendation_note
+    change_log.experiment_status = recommendation.recommended_status
+    change_log.experiment_outcome = recommendation.recommended_outcome
+    change_log.outcome_recorded_at = timezone.now()
+    change_log.outcome_recorded_by = user if getattr(user, "is_authenticated", False) else None
+    change_log.save(update_fields=[
+        "experiment_status",
+        "experiment_outcome",
+        "experiment_notes",
+        "outcome_recorded_at",
+        "outcome_recorded_by",
+        "updated_at",
+    ])
+    return change_log
+
+
+
+def apply_decision_to_decision_rule_change_log(*, snapshot: ExperimentDecisionTuningExperimentSnapshot, user=None, note: str = "") -> ExperimentDecisionTuningChangeLog:
+    """Save a snapshot recommendation back to a decision-rule change log."""
+    recommendation = recommend_experiment_decision(snapshot)
+    change_log = snapshot.change_log
+    recommendation_note = (
+        f"Decision-rule experiment recommendation from snapshot #{snapshot.pk}: {recommendation.label} "
         f"(confidence: {recommendation.confidence}, score: {recommendation.score}). {recommendation.summary}"
     )
     if note:

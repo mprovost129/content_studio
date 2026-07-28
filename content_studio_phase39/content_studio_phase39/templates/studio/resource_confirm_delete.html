@@ -1,5 +1,0 @@
-{% extends "base.html" %}
-{% block title %}Delete resource{% endblock %}
-{% block content %}
-<div class="panel"><h1>Delete resource?</h1><p>This will delete <strong>{{ object.title }}</strong>.</p><form method="post">{% csrf_token %}<button class="btn btn-danger" type="submit">Delete</button> <a class="btn btn-secondary" href="{{ object.get_absolute_url }}">Cancel</a></form></div>
-{% endblock %}

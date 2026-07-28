@@ -1,9 +1,0 @@
-{% extends "base.html" %}
-{% block title %}Delete Newsletter Campaign{% endblock %}
-{% block content %}
-<section class="panel narrow-panel">
-    <h1>Delete newsletter campaign?</h1>
-    <p>This will remove <strong>{{ object.title }}</strong>. Subscriber records and publishing records will not be deleted.</p>
-    <form method="post">{% csrf_token %}<button class="btn btn-danger" type="submit">Delete campaign</button><a class="btn btn-secondary" href="{% url 'studio:newsletter-campaign-list' %}">Cancel</a></form>
-</section>
-{% endblock %}

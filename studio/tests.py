@@ -1,4 +1,5 @@
 import tempfile
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,9 @@ from .models import (
     ContentPlan,
     EmailProvider,
     ExperimentDecisionTuning,
+    ExperimentDecisionTuningChangeLog,
+    ExperimentDecisionTuningExperimentSnapshot,
+    ExperimentDecisionTuningSnapshotComparisonReport,
     GraphicAsset,
     GraphicTemplate,
     LearningResource,
@@ -1806,10 +1810,10 @@ class ResourceCTARecommendationTests(TestCase):
         snapshot = RecommendationTuningExperimentSnapshot.objects.create(
             change_log=log,
             window_days=14,
-            before_start=now - timezone.timedelta(days=14),
+            before_start=now - timedelta(days=14),
             before_end=now,
             after_start=now,
-            after_end=now + timezone.timedelta(days=14),
+            after_end=now + timedelta(days=14),
             before_metrics={},
             after_metrics={},
             deltas={
@@ -1856,10 +1860,10 @@ class ResourceCTARecommendationTests(TestCase):
         snapshot = RecommendationTuningExperimentSnapshot.objects.create(
             change_log=log,
             window_days=14,
-            before_start=now - timezone.timedelta(days=14),
+            before_start=now - timedelta(days=14),
             before_end=now,
             after_start=now,
-            after_end=now + timezone.timedelta(days=14),
+            after_end=now + timedelta(days=14),
             before_metrics={},
             after_metrics={},
             deltas={
@@ -1939,10 +1943,10 @@ class ResourceCTARecommendationTests(TestCase):
         snapshot = RecommendationTuningExperimentSnapshot.objects.create(
             change_log=log,
             window_days=14,
-            before_start=now - timezone.timedelta(days=14),
+            before_start=now - timedelta(days=14),
             before_end=now,
             after_start=now,
-            after_end=now + timezone.timedelta(days=14),
+            after_end=now + timedelta(days=14),
             before_metrics={},
             after_metrics={},
             deltas={
@@ -1958,3 +1962,453 @@ class ResourceCTARecommendationTests(TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertContains(detail, "Inconclusive")
         self.assertContains(detail, "Decision rules")
+
+
+
+class ExperimentDecisionTuningHistoryTests(TestCase):
+    def setUp(self):
+        self.staff = get_user_model().objects.create_user(
+            email="decision-history@example.com",
+            password="testpass",
+            is_staff=True,
+        )
+        self.client.force_login(self.staff)
+
+    def _post_payload(self, **overrides):
+        tuning = ExperimentDecisionTuning.get_active()
+        payload = {
+            "name": tuning.name,
+            "is_active": "on",
+            "keep_score_threshold": tuning.keep_score_threshold,
+            "keep_primary_positive_min": tuning.keep_primary_positive_min,
+            "keep_high_confidence_score": tuning.keep_high_confidence_score,
+            "rollback_score_threshold": tuning.rollback_score_threshold,
+            "rollback_primary_negative_min": tuning.rollback_primary_negative_min,
+            "rollback_high_confidence_score": tuning.rollback_high_confidence_score,
+            "low_confidence_abs_score": tuning.low_confidence_abs_score,
+            "max_metric_change_magnitude": tuning.max_metric_change_magnitude,
+            "social_new_followers_weight": tuning.social_new_followers_weight,
+            "social_engagements_weight": tuning.social_engagements_weight,
+            "social_reach_weight": tuning.social_reach_weight,
+            "social_clicks_weight": tuning.social_clicks_weight,
+            "resources_pdf_downloads_weight": tuning.resources_pdf_downloads_weight,
+            "resources_pdf_unlocks_weight": tuning.resources_pdf_unlocks_weight,
+            "resources_subscribers_weight": tuning.resources_subscribers_weight,
+            "newsletter_clicks_weight": tuning.newsletter_clicks_weight,
+            "newsletter_open_rate_weight": tuning.newsletter_open_rate_weight,
+            "ctas_cta_clicks_weight": tuning.ctas_cta_clicks_weight,
+            "conversions_total_conversions_weight": tuning.conversions_total_conversions_weight,
+            "conversions_lesson_views_weight": tuning.conversions_lesson_views_weight,
+            "conversions_quiz_attempts_weight": tuning.conversions_quiz_attempts_weight,
+            "conversions_challenge_attempts_weight": tuning.conversions_challenge_attempts_weight,
+            "conversions_lesson_completions_weight": tuning.conversions_lesson_completions_weight,
+            "newsletter_unsubscribes_penalty_weight": tuning.newsletter_unsubscribes_penalty_weight,
+            "newsletter_bounces_penalty_weight": tuning.newsletter_bounces_penalty_weight,
+            "notes": tuning.notes,
+            "change_reason": "Testing decision-rule audit logging.",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_decision_rule_save_creates_audit_log(self):
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning"),
+            self._post_payload(keep_score_threshold="8.5"),
+        )
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning"))
+        log = ExperimentDecisionTuningChangeLog.objects.latest("created_at")
+        self.assertEqual(log.action, ExperimentDecisionTuningChangeLog.Action.MANUAL_UPDATE)
+        self.assertIn("keep_score_threshold", log.diff)
+        self.assertEqual(log.changed_by, self.staff)
+
+    def test_decision_rule_history_and_export(self):
+        tuning = ExperimentDecisionTuning.get_active()
+        ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.staff,
+            before={"keep_score_threshold": 6.0},
+            after={"keep_score_threshold": 7.0},
+            diff={"keep_score_threshold": {"before": 6.0, "after": 7.0}},
+            reason="History test",
+        )
+        response = self.client.get(reverse("studio:experiment-decision-tuning-history"))
+        self.assertContains(response, "Decision-rule audit log")
+        export = self.client.get(reverse("studio:experiment-decision-tuning-history-export"))
+        self.assertContains(export, "keep_score_threshold")
+        self.assertEqual(export["Content-Type"], "text/csv")
+
+    def test_decision_rule_rollback_restores_snapshot(self):
+        tuning = ExperimentDecisionTuning.get_active()
+        before = {field.name: getattr(tuning, field.name) for field in ExperimentDecisionTuning._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        after = before.copy()
+        before["keep_score_threshold"] = 4.0
+        after["keep_score_threshold"] = 9.0
+        log = ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.staff,
+            before=before,
+            after=after,
+            diff={"keep_score_threshold": {"before": 4.0, "after": 9.0}},
+        )
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning-rollback", args=[log.pk]),
+            {"snapshot": "before", "rollback_reason": "Undo test"},
+        )
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-history"))
+        tuning.refresh_from_db()
+        self.assertEqual(tuning.keep_score_threshold, 4.0)
+        rollback = ExperimentDecisionTuningChangeLog.objects.latest("created_at")
+        self.assertEqual(rollback.action, ExperimentDecisionTuningChangeLog.Action.ROLLBACK_RESTORED)
+
+
+    def test_decision_rule_preset_application_creates_audit_log(self):
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning-preset-apply"),
+            {"preset_key": "aggressive_growth", "change_reason": "Testing preset apply"},
+        )
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning"))
+        tuning = ExperimentDecisionTuning.get_active()
+        self.assertEqual(tuning.name, "Aggressive Growth")
+        self.assertEqual(tuning.keep_primary_positive_min, 1)
+        log = ExperimentDecisionTuningChangeLog.objects.latest("created_at")
+        self.assertEqual(log.action, ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED)
+        self.assertIn("social_new_followers_weight", log.diff)
+
+    def test_decision_rule_simulation_does_not_change_active_rules(self):
+        tuning = ExperimentDecisionTuning.get_active()
+        original_name = tuning.name
+        change_log = ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.staff,
+            before={},
+            after={},
+            diff={},
+            experiment_label="Simulation test",
+            experiment_status=ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+        now = timezone.now()
+        snapshot = ExperimentDecisionTuningExperimentSnapshot.objects.create(
+            change_log=change_log,
+            window_days=7,
+            before_start=now - timedelta(days=14),
+            before_end=now - timedelta(days=7),
+            after_start=now - timedelta(days=7),
+            after_end=now,
+            deltas={
+                "social": {"new_followers": {"change": 4}, "clicks": {"change": 2}},
+                "resources": {"pdf_downloads": {"change": 3}, "subscribers": {"change": 2}},
+                "conversions": {"total_conversions": {"change": 5}},
+            },
+            generated_by=self.staff,
+        )
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning-simulation"),
+            {"snapshot": snapshot.pk, "preset_keys": ["aggressive_growth", "conservative_quality"]},
+        )
+        self.assertContains(response, "Aggressive Growth")
+        self.assertContains(response, "Conservative Quality")
+        tuning.refresh_from_db()
+        self.assertEqual(tuning.name, original_name)
+
+    def test_decision_rule_manual_change_can_be_labeled_as_experiment(self):
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning"),
+            self._post_payload(
+                keep_score_threshold="8.75",
+                experiment_label="August decision rule test",
+                experiment_status=ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING,
+                experiment_notes="Hypothesis: stricter keep rules improve quality.",
+            ),
+        )
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning"))
+        log = ExperimentDecisionTuningChangeLog.objects.latest("created_at")
+        self.assertEqual(log.experiment_label, "August decision rule test")
+        self.assertEqual(log.experiment_status, ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING)
+        self.assertTrue(log.is_experiment)
+
+    def test_decision_rule_preset_can_start_named_experiment(self):
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning-preset-apply"),
+            {
+                "preset_key": "lead_magnet_focus",
+                "experiment_label": "Lead magnet decision test",
+                "experiment_status": ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING,
+                "experiment_notes": "Hypothesis: lead magnet rules produce better keep decisions for resources.",
+            },
+        )
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning"))
+        log = ExperimentDecisionTuningChangeLog.objects.latest("created_at")
+        self.assertEqual(log.action, ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED)
+        self.assertEqual(log.preset_key, "lead_magnet_focus")
+        self.assertEqual(log.preset_name, "Lead Magnet Focus")
+        self.assertEqual(log.experiment_label, "Lead magnet decision test")
+        self.assertEqual(log.experiment_status, ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING)
+
+    def test_decision_rule_experiment_outcome_page_updates_log(self):
+        tuning = ExperimentDecisionTuning.get_active()
+        log = ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED,
+            changed_by=self.staff,
+            preset_key="balanced_learning",
+            preset_name="Balanced Learning",
+            experiment_label="Balanced decision test",
+            experiment_status=ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning-experiment", args=[log.pk]),
+            {
+                "experiment_label": "Balanced decision test",
+                "experiment_status": ExperimentDecisionTuningChangeLog.ExperimentStatus.KEEP,
+                "experiment_outcome": ExperimentDecisionTuningChangeLog.ExperimentOutcome.POSITIVE,
+                "experiment_notes": "Keep this preset. Snapshot performance improved.",
+            },
+        )
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-history"))
+        log.refresh_from_db()
+        self.assertEqual(log.experiment_status, ExperimentDecisionTuningChangeLog.ExperimentStatus.KEEP)
+        self.assertEqual(log.experiment_outcome, ExperimentDecisionTuningChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertEqual(log.outcome_recorded_by, self.staff)
+        self.assertIsNotNone(log.outcome_recorded_at)
+
+    def test_decision_rule_history_filters_and_exports_experiment_fields(self):
+        tuning = ExperimentDecisionTuning.get_active()
+        ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED,
+            changed_by=self.staff,
+            preset_key="aggressive_growth",
+            preset_name="Aggressive Growth",
+            experiment_label="Growth rules test",
+            experiment_status=ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING,
+            experiment_outcome=ExperimentDecisionTuningChangeLog.ExperimentOutcome.NOT_RECORDED,
+        )
+        response = self.client.get(reverse("studio:experiment-decision-tuning-history"), {"experiment_label": "Growth"})
+        self.assertContains(response, "Growth rules test")
+        export = self.client.get(reverse("studio:experiment-decision-tuning-history-export"), {"experiment_label": "Growth"})
+        self.assertContains(export, "preset_key")
+        self.assertContains(export, "aggressive_growth")
+        self.assertContains(export, "Growth rules test")
+
+
+    def test_decision_rule_experiment_snapshot_create_and_export(self):
+        tuning = ExperimentDecisionTuning.get_active()
+        log = ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED,
+            changed_by=self.staff,
+            preset_key="lead_magnet_focus",
+            preset_name="Lead Magnet Focus",
+            experiment_label="Lead magnet decision snapshot",
+            experiment_status=ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+        PublishingRecord.objects.create(
+            lesson=Lesson.objects.create(title="Snapshot lesson", summary="Test"),
+            platform="facebook",
+            published_at=timezone.now() + timedelta(days=1),
+            new_followers=4,
+            reach=100,
+            likes=10,
+        )
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning-experiment-snapshot-create", args=[log.pk]),
+            {"window_days": 14, "notes": "Review lead magnet decision rules."},
+        )
+        snapshot = ExperimentDecisionTuningExperimentSnapshot.objects.get(change_log=log)
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertEqual(snapshot.window_days, 14)
+        self.assertEqual(snapshot.deltas["social"]["new_followers"]["change"], 4)
+
+        detail = self.client.get(reverse("studio:experiment-decision-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertContains(detail, "Decision recommendation")
+        export = self.client.get(reverse("studio:experiment-decision-tuning-experiment-snapshot-export", args=[snapshot.pk]))
+        self.assertContains(export, "Lead magnet decision snapshot")
+        self.assertContains(export, "New followers")
+
+    def test_decision_rule_snapshot_can_record_recommendation(self):
+        tuning = ExperimentDecisionTuning.get_active()
+        log = ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.staff,
+            experiment_label="Decision keep test",
+            experiment_status=ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+        now = timezone.now()
+        snapshot = ExperimentDecisionTuningExperimentSnapshot.objects.create(
+            change_log=log,
+            window_days=7,
+            before_start=now - timedelta(days=14),
+            before_end=now - timedelta(days=7),
+            after_start=now - timedelta(days=7),
+            after_end=now,
+            deltas={
+                "social": {"new_followers": {"change": 5}, "clicks": {"change": 3}},
+                "resources": {"pdf_downloads": {"change": 2}},
+                "newsletter": {"clicks": {"change": 2}},
+                "ctas": {"cta_clicks": {"change": 3}},
+                "conversions": {"total_conversions": {"change": 4}},
+            },
+            generated_by=self.staff,
+        )
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning-experiment-snapshot-detail", args=[snapshot.pk]),
+            {"action": "apply_decision_recommendation", "decision_note": "Looks strong."},
+        )
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        log.refresh_from_db()
+        self.assertEqual(log.experiment_outcome, ExperimentDecisionTuningChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertIn("Decision-rule experiment recommendation from snapshot", log.experiment_notes)
+
+
+    def test_decision_rule_snapshot_comparison_page_and_export(self):
+        tuning = ExperimentDecisionTuning.get_active()
+        first_log = ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED,
+            changed_by=self.staff,
+            preset_key="aggressive_growth",
+            preset_name="Aggressive Growth",
+            experiment_label="Aggressive rules test",
+        )
+        second_log = ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED,
+            changed_by=self.staff,
+            preset_key="balanced_learning",
+            preset_name="Balanced Learning",
+            experiment_label="Balanced rules test",
+        )
+        now = timezone.now()
+        first = ExperimentDecisionTuningExperimentSnapshot.objects.create(
+            change_log=first_log,
+            window_days=7,
+            before_start=now - timedelta(days=14),
+            before_end=now - timedelta(days=7),
+            after_start=now - timedelta(days=7),
+            after_end=now,
+            deltas={
+                "social": {"new_followers": {"before": 1, "after": 5, "change": 4, "pct": 400}},
+                "resources": {"pdf_downloads": {"before": 0, "after": 2, "change": 2, "pct": None}},
+                "newsletter": {"clicks": {"before": 0, "after": 1, "change": 1, "pct": None}},
+                "ctas": {"cta_clicks": {"before": 0, "after": 3, "change": 3, "pct": None}},
+                "conversions": {"total_conversions": {"before": 0, "after": 4, "change": 4, "pct": None}},
+            },
+            summary={"primary_social_delta": {"change": 4}, "primary_conversion_delta": {"change": 4}},
+            generated_by=self.staff,
+        )
+        second = ExperimentDecisionTuningExperimentSnapshot.objects.create(
+            change_log=second_log,
+            window_days=14,
+            before_start=now - timedelta(days=28),
+            before_end=now - timedelta(days=14),
+            after_start=now - timedelta(days=14),
+            after_end=now,
+            deltas={"social": {"new_followers": {"before": 5, "after": 3, "change": -2, "pct": -40}}},
+            summary={"primary_social_delta": {"change": -2}},
+            generated_by=self.staff,
+        )
+        params = {"snapshots": [first.pk, second.pk], "preset_keys": ["lead_magnet_focus"]}
+        response = self.client.get(reverse("studio:experiment-decision-tuning-experiment-snapshot-compare"), params)
+        self.assertContains(response, "Compare decision-rule snapshots")
+        self.assertContains(response, "Aggressive rules test")
+        self.assertContains(response, "Balanced rules test")
+        self.assertContains(response, "Lead Magnet Focus")
+        self.assertContains(response, "Visual comparison charts")
+        self.assertContains(response, "Largest metric movements")
+
+        export = self.client.get(reverse("studio:experiment-decision-tuning-experiment-snapshot-compare-export"), params)
+        self.assertContains(export, "Summary comparison")
+        self.assertContains(export, "Aggressive rules test")
+        self.assertContains(export, "Decision recommendations")
+        self.assertContains(export, "Chart data - top metric deltas")
+        self.assertContains(export, "Chart data - decision counts")
+
+    def test_saved_decision_rule_snapshot_comparison_report_create_detail_and_export(self):
+        tuning = ExperimentDecisionTuning.get_active()
+        log = ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED,
+            changed_by=self.staff,
+            preset_key="lead_magnet_focus",
+            preset_name="Lead Magnet Focus",
+            experiment_label="Lead magnet decision test",
+        )
+        now = timezone.now()
+        snapshot = ExperimentDecisionTuningExperimentSnapshot.objects.create(
+            change_log=log,
+            window_days=14,
+            before_start=now - timedelta(days=28),
+            before_end=now - timedelta(days=14),
+            after_start=now - timedelta(days=14),
+            after_end=now,
+            deltas={"resources": {"pdf_downloads": {"before": 1, "after": 5, "change": 4, "pct": 400}}},
+            summary={"primary_resource_delta": {"change": 4}},
+            generated_by=self.staff,
+        )
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning-snapshot-comparison-report-create"),
+            {
+                "title": "Lead magnet snapshot review",
+                "description": "Compare resource-focused rule changes.",
+                "snapshots": [snapshot.pk],
+                "preset_keys": ["lead_magnet_focus"],
+                "notes": "Keep an eye on downloads and learner conversions.",
+            },
+        )
+        report = ExperimentDecisionTuningSnapshotComparisonReport.objects.get(title="Lead magnet snapshot review")
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", args=[report.pk]))
+        self.assertEqual(report.snapshots.count(), 1)
+        self.assertEqual(report.preset_keys, ["lead_magnet_focus"])
+        self.assertEqual(report.decision_status, ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED)
+
+        update = self.client.post(
+            reverse("studio:experiment-decision-tuning-snapshot-comparison-report-update", args=[report.pk]),
+            {
+                "title": "Lead magnet snapshot review",
+                "description": "Compare resource-focused rule changes.",
+                "snapshots": [snapshot.pk],
+                "preset_keys": ["lead_magnet_focus"],
+                "notes": "Keep an eye on downloads and learner conversions.",
+                "decision_status": ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.WATCH,
+                "decision_summary": "Watch this rule set for another content cycle.",
+                "decision_notes": "Downloads improved, but learner conversions need more time.",
+                "decision_owner": self.staff.pk,
+            },
+        )
+        self.assertRedirects(update, reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", args=[report.pk]))
+        report.refresh_from_db()
+        self.assertEqual(report.decision_status, ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.WATCH)
+        self.assertEqual(report.decision_owner, self.staff)
+        self.assertEqual(report.decision_recorded_by, self.staff)
+        self.assertIsNotNone(report.decision_recorded_at)
+
+        detail = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", args=[report.pk]))
+        self.assertContains(detail, "Lead magnet snapshot review")
+        self.assertContains(detail, "Lead Magnet Focus")
+        self.assertContains(detail, "Resource downloads")
+        self.assertContains(detail, "Visual comparison charts")
+        self.assertContains(detail, "Decision score chart")
+        self.assertContains(detail, "Printable report")
+        self.assertContains(detail, "Report decision")
+        self.assertContains(detail, "Watch this rule set")
+
+        printable = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-print", args=[report.pk]))
+        self.assertContains(printable, "Code with Michael · Decision-Rule Comparison Report")
+        self.assertContains(printable, "Print / Save as PDF")
+        self.assertContains(printable, "Executive summary")
+        self.assertContains(printable, "Largest metric movements")
+        self.assertContains(printable, "Prepared in Code with Michael Content Studio")
+
+        export = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-export", args=[report.pk]))
+        self.assertContains(export, "Saved comparison report")
+        self.assertContains(export, "Lead magnet snapshot review")
+        self.assertContains(export, "decision_status")
+        self.assertContains(export, "Watch this rule set")
+        self.assertContains(export, "Decision recommendations")
+        self.assertContains(export, "Chart data - decision counts")
+        self.assertContains(export, "Chart data - top metric deltas")
+

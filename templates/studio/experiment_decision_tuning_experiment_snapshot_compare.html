@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block title %}Compare decision-rule snapshots{% endblock %}
+
+{% block extra_css %}
+<style>
+.comparison-chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.comparison-chart { display: grid; gap: 12px; padding: 16px; background: #0b1020; border: 1px solid var(--border); border-radius: 14px; }
+.comparison-chart h3 { margin: 0; font-size: 1rem; }
+.chart-row { display: grid; gap: 6px; }
+.chart-label { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: .84rem; }
+.chart-track { min-height: 13px; overflow: hidden; background: #172136; border-radius: 999px; }
+.chart-fill { display: block; min-width: 4px; height: 13px; border-radius: 999px; background: #7e8799; }
+.chart-fill.positive, .chart-fill.keep { background: #42c767; }
+.chart-fill.negative, .chart-fill.rollback { background: #e06a6a; }
+.chart-fill.neutral, .chart-fill.inconclusive { background: #8acbff; }
+.chart-fill.warning { background: #ffd967; }
+.chart-subgrid { display: grid; gap: 10px; }
+.chart-card-title { color: var(--ink); font-weight: 800; }
+.chart-note { color: var(--muted); font-size: .84rem; margin: 0; }
+</style>
+{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">RECOMMENDATIONS</span>
+        <h1>Compare decision-rule snapshots</h1>
+        <p>Compare multiple before/after experiment windows side by side, then test how the active decision rules and selected presets would judge each snapshot.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-experiment-snapshots' %}">All snapshots</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-simulation' %}">Preset simulation</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning' %}">Decision rules</a>
+        {% if selected_count %}<a class="btn btn-primary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-create' %}{% if export_query %}?{{ export_query }}{% endif %}">Save report</a><a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-experiment-snapshot-compare-export' %}{% if export_query %}?{{ export_query }}{% endif %}">Export CSV</a>{% endif %}
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-reports' %}">Saved reports</a>
+    </div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Comparison setup</h2></div>
+    <form method="get" class="stacked-form">
+        {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="two-column">
+            <div>
+                <h3>{{ form.snapshots.label }}</h3>
+                <p class="muted">{{ form.snapshots.help_text }}</p>
+                {% for error in form.snapshots.errors %}<p class="text-danger">{{ error }}</p>{% endfor %}
+                <div class="checkbox-list">
+                    {{ form.snapshots }}
+                </div>
+            </div>
+            <div>
+                <h3>{{ form.preset_keys.label }}</h3>
+                <p class="muted">{{ form.preset_keys.help_text }}</p>
+                <div class="checkbox-list">
+                    {{ form.preset_keys }}
+                </div>
+            </div>
+        </div>
+        <div class="mt-3">
+            <button class="btn btn-primary" type="submit">Compare snapshots</button>
+            <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-experiment-snapshot-compare' %}">Reset to latest three</a>
+        </div>
+    </form>
+</section>
+
+{% if selected_count %}
+<section class="stats-grid mt-4">
+    <div class="stat-card"><span>Snapshots compared</span><strong>{{ selected_count }}</strong></div>
+    <div class="stat-card"><span>Decision profiles</span><strong>{{ comparison.profiles|length }}</strong></div>
+</section>
+
+
+<section class="panel mt-4">
+    <div class="panel-heading">
+        <h2>Visual comparison charts</h2>
+        <p class="muted">Quick visual read of the saved snapshots before reviewing the full metric tables.</p>
+    </div>
+    <div class="comparison-chart-grid">
+        <div class="comparison-chart">
+            <h3>Primary metric deltas</h3>
+            {% for chart in comparison_charts.summary_chart %}
+            <div class="chart-subgrid">
+                <div class="chart-card-title">{{ chart.label }}</div>
+                {% for bar in chart.bars %}
+                <div class="chart-row">
+                    <div class="chart-label"><span>{{ bar.label }}</span><strong>{{ bar.display|default:"0" }}{% if bar.pct != None %} · {{ bar.pct }}%{% endif %}</strong></div>
+                    <div class="chart-track"><span class="chart-fill {{ bar.tone }}" style="width: {{ bar.width }}%"></span></div>
+                </div>
+                {% endfor %}
+            </div>
+            {% empty %}<p class="chart-note">No summary metrics are available for these snapshots.</p>{% endfor %}
+        </div>
+
+        <div class="comparison-chart">
+            <h3>Decision recommendation mix</h3>
+            {% for row in comparison_charts.decision_count_chart %}
+            <div class="chart-row">
+                <div class="chart-label"><span>{{ row.label }}</span><strong>{{ row.count }}</strong></div>
+                <div class="chart-track"><span class="chart-fill {{ row.css_class }}" style="width: {{ row.width }}%"></span></div>
+            </div>
+            {% empty %}<p class="chart-note">No recommendation decisions are available.</p>{% endfor %}
+        </div>
+    </div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading">
+        <h2>Decision score chart</h2>
+        <p class="muted">Shows how strongly each active/preset rule profile judged each saved snapshot.</p>
+    </div>
+    <div class="comparison-chart-grid">
+        {% for card in comparison_charts.decision_score_chart %}
+        <div class="comparison-chart">
+            <h3>{{ card.label }}</h3>
+            {% for score in card.scores %}
+            <div class="chart-row">
+                <div class="chart-label"><span>{{ score.profile.label }}</span><strong>{{ score.score }}</strong></div>
+                <div class="chart-track"><span class="chart-fill {{ score.tone }}" style="width: {{ score.width }}%"></span></div>
+            </div>
+            {% endfor %}
+        </div>
+        {% empty %}<p class="chart-note">No decision scores are available.</p>{% endfor %}
+    </div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading">
+        <h2>Largest metric movements</h2>
+        <p class="muted">The highest-magnitude changes across the selected comparison snapshots.</p>
+    </div>
+    <div class="comparison-chart-grid">
+        {% for chart in comparison_charts.metric_delta_chart %}
+        <div class="comparison-chart">
+            <h3>{{ chart.section_label }} · {{ chart.metric_label }}</h3>
+            {% for bar in chart.bars %}
+            <div class="chart-row">
+                <div class="chart-label"><span>{{ bar.label }}</span><strong>{{ bar.display|default:"0" }}{% if chart.is_percent_metric %} pts{% endif %}{% if bar.pct != None %} · {{ bar.pct }}%{% endif %}</strong></div>
+                <div class="chart-track"><span class="chart-fill {{ bar.tone }}" style="width: {{ bar.width }}%"></span></div>
+            </div>
+            {% endfor %}
+        </div>
+        {% empty %}<p class="chart-note">No metric deltas are available.</p>{% endfor %}
+    </div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Snapshot summary</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Metric</th>
+                    {% for card in comparison.snapshot_cards %}
+                    <th>{{ card.snapshot.experiment_label }}<br><small>{{ card.snapshot.window_days }} days · {{ card.snapshot.generated_at|date:"M j" }}</small></th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in comparison.summary_rows %}
+                <tr>
+                    <td><strong>{{ row.label }}</strong></td>
+                    {% for cell in row.cells %}<td>{{ cell.change|default:"0" }}{% if cell.pct != None %}<br><small>{{ cell.pct }}%</small>{% endif %}</td>{% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Decision recommendation matrix</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Snapshot</th>
+                    {% for profile in comparison.profiles %}<th>{{ profile.label }}</th>{% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for card in comparison.snapshot_cards %}
+                <tr>
+                    <td><strong>{{ card.snapshot.experiment_label }}</strong><br><small>{{ card.snapshot.window_days }} days · <a href="{% url 'studio:experiment-decision-tuning-experiment-snapshot-detail' card.snapshot.pk %}">review</a></small></td>
+                    {% for item in card.recommendations %}
+                    <td>
+                        <span class="badge badge-{{ item.recommendation.css_class }}">{{ item.recommendation.label }}</span><br>
+                        <small>{{ item.recommendation.confidence }} confidence · score {{ item.recommendation.score }}</small><br>
+                        <small>{{ item.recommendation.summary }}</small>
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Full metric comparison</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Area</th>
+                    <th>Metric</th>
+                    {% for card in comparison.snapshot_cards %}<th>{{ card.snapshot.experiment_label }}<br><small>Before → after / change</small></th>{% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in comparison.metric_rows %}
+                <tr>
+                    <td>{{ row.section_label }}</td>
+                    <td><strong>{{ row.metric_label }}</strong></td>
+                    {% for cell in row.cells %}
+                    <td>
+                        {{ cell.before|default:"0" }}{% if row.is_percent_metric and cell.before != None %}%{% endif %}
+                        →
+                        {{ cell.after|default:"0" }}{% if row.is_percent_metric and cell.after != None %}%{% endif %}<br>
+                        <small>Change: {{ cell.change|default:"0" }}{% if row.is_percent_metric %} pts{% endif %}{% if cell.pct != None %} · {{ cell.pct }}%{% endif %}</small>
+                    </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% else %}
+<section class="panel mt-4"><p class="muted">Choose at least one valid snapshot to compare.</p></section>
+{% endif %}
+{% endblock %}

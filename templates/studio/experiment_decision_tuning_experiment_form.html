@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Decision-rule experiment outcome{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div>
+        <span class="eyebrow">DECISION RULES</span>
+        <h1>Record decision-rule experiment outcome</h1>
+        <p>Track whether a preset-based decision-rule change worked, should be kept, should be rolled back, or needs more data.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-history' %}">Decision history</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-rollback' change_log.pk %}">Review rollback</a>
+    </div>
+</div>
+
+<section class="panel mb-4">
+    <div class="panel-heading"><h2>Change summary</h2></div>
+    <div class="row g-3">
+        <div class="col-md-3"><div class="metric-card"><span>Action</span><strong>{{ change_log.get_action_display }}</strong></div></div>
+        <div class="col-md-3"><div class="metric-card"><span>Preset</span><strong>{{ change_log.preset_name|default:"Manual" }}</strong></div></div>
+        <div class="col-md-3"><div class="metric-card"><span>Changed fields</span><strong>{{ change_log.changed_field_count }}</strong></div></div>
+        <div class="col-md-3"><div class="metric-card"><span>Date</span><strong>{{ change_log.created_at|date:"M j" }}</strong></div></div>
+    </div>
+    {% if change_log.reason %}<p class="mt-3"><strong>Original reason:</strong> {{ change_log.reason }}</p>{% endif %}
+</section>
+
+<form method="post" class="panel form-panel">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="row g-3">
+        {% for field in form %}
+        <div class="col-md-{% if field.name == 'experiment_notes' or field.name == 'experiment_label' %}12{% else %}6{% endif %}">
+            <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+            {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+    <div class="form-actions mt-4">
+        <button class="btn btn-primary" type="submit">Save outcome</button>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-history' %}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

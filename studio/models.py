@@ -1866,6 +1866,262 @@ class ExperimentDecisionTuning(TimestampedModel):
         }
 
 
+class ExperimentDecisionTuningChangeLog(TimestampedModel):
+    """Audit trail for experiment decision-rule tuning changes, preset experiments, and outcomes."""
+
+    class Action(models.TextChoices):
+        MANUAL_UPDATE = "manual_update", "Manual update"
+        PRESET_APPLIED = "preset_applied", "Preset applied"
+        ROLLBACK_RESTORED = "rollback_restored", "Rollback restored"
+
+    class ExperimentStatus(models.TextChoices):
+        NOT_EXPERIMENT = "not_experiment", "Not an experiment"
+        PLANNED = "planned", "Planned"
+        RUNNING = "running", "Running"
+        KEEP = "keep", "Keep changes"
+        ROLLBACK = "rollback", "Rollback recommended"
+        COMPLETE = "complete", "Complete"
+        INCONCLUSIVE = "inconclusive", "Inconclusive"
+
+    class ExperimentOutcome(models.TextChoices):
+        NOT_RECORDED = "not_recorded", "Not recorded"
+        POSITIVE = "positive", "Positive"
+        NEUTRAL = "neutral", "Neutral"
+        NEGATIVE = "negative", "Negative"
+        INCONCLUSIVE = "inconclusive", "Inconclusive"
+
+    tuning = models.ForeignKey(
+        ExperimentDecisionTuning,
+        on_delete=models.CASCADE,
+        related_name="change_logs",
+    )
+    action = models.CharField(max_length=30, choices=Action.choices, db_index=True)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="experiment_decision_tuning_changes",
+    )
+    preset_key = models.CharField(max_length=80, blank=True)
+    preset_name = models.CharField(max_length=120, blank=True)
+    reason = models.TextField(blank=True)
+    before = models.JSONField(default=dict, blank=True)
+    after = models.JSONField(default=dict, blank=True)
+    diff = models.JSONField(default=dict, blank=True)
+    request_path = models.CharField(max_length=300, blank=True)
+    experiment_label = models.CharField(
+        max_length=160,
+        blank=True,
+        db_index=True,
+        help_text="Optional label for a decision-rule experiment, such as August lead magnet decision test.",
+    )
+    experiment_status = models.CharField(
+        max_length=30,
+        choices=ExperimentStatus.choices,
+        default=ExperimentStatus.NOT_EXPERIMENT,
+        db_index=True,
+    )
+    experiment_outcome = models.CharField(
+        max_length=30,
+        choices=ExperimentOutcome.choices,
+        default=ExperimentOutcome.NOT_RECORDED,
+        db_index=True,
+    )
+    experiment_notes = models.TextField(
+        blank=True,
+        help_text="Result notes, hypothesis, decision rationale, or follow-up observations for this decision-rule experiment.",
+    )
+    outcome_recorded_at = models.DateTimeField(null=True, blank=True)
+    outcome_recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="experiment_decision_tuning_outcomes_recorded",
+    )
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        verbose_name = "experiment decision tuning change log"
+        verbose_name_plural = "experiment decision tuning change logs"
+
+    def __str__(self):
+        label = self.preset_name or self.get_action_display()
+        return f"{label} · {self.created_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def changed_field_count(self):
+        return len(self.diff or {})
+
+    @property
+    def is_experiment(self):
+        return bool(self.experiment_label or self.experiment_status != self.ExperimentStatus.NOT_EXPERIMENT)
+
+    @property
+    def experiment_summary(self):
+        if not self.is_experiment:
+            return "Not tracked as experiment"
+        return f"{self.experiment_label or 'Unnamed experiment'} · {self.get_experiment_status_display()} · {self.get_experiment_outcome_display()}"
+
+
+
+
+
+
+
+class ExperimentDecisionTuningExperimentSnapshot(TimestampedModel):
+    """Before/after performance snapshot for a decision-rule tuning experiment."""
+
+    change_log = models.ForeignKey(
+        ExperimentDecisionTuningChangeLog,
+        on_delete=models.CASCADE,
+        related_name="performance_snapshots",
+    )
+    window_days = models.PositiveSmallIntegerField(default=14)
+    before_start = models.DateTimeField(db_index=True)
+    before_end = models.DateTimeField(db_index=True)
+    after_start = models.DateTimeField(db_index=True)
+    after_end = models.DateTimeField(db_index=True)
+    before_metrics = models.JSONField(default=dict, blank=True)
+    after_metrics = models.JSONField(default=dict, blank=True)
+    deltas = models.JSONField(default=dict, blank=True)
+    summary = models.JSONField(default=dict, blank=True)
+    notes = models.TextField(blank=True)
+    generated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="experiment_decision_tuning_experiment_snapshots",
+    )
+    generated_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ("-generated_at", "-pk")
+        indexes = [
+            models.Index(fields=("change_log", "generated_at")),
+            models.Index(fields=("before_start", "after_end")),
+        ]
+        verbose_name = "experiment decision-rule snapshot"
+        verbose_name_plural = "experiment decision-rule snapshots"
+
+    @property
+    def experiment_label(self):
+        return self.change_log.experiment_label or self.change_log.preset_name or self.change_log.get_action_display()
+
+    def __str__(self):
+        return f"{self.experiment_label} · {self.window_days} day decision-rule snapshot"
+
+
+
+
+class ExperimentDecisionTuningSnapshotComparisonReport(TimestampedModel):
+    """Named, reusable comparison of decision-rule experiment snapshots."""
+
+    class DecisionStatus(models.TextChoices):
+        UNDECIDED = "undecided", "No decision yet"
+        KEEP = "keep", "Keep"
+        ROLL_BACK = "roll_back", "Roll back"
+        WATCH = "watch", "Watch"
+        ARCHIVED = "archived", "Archived"
+
+    title = models.CharField(max_length=180, db_index=True)
+    description = models.TextField(blank=True)
+    decision_status = models.CharField(
+        max_length=20,
+        choices=DecisionStatus.choices,
+        default=DecisionStatus.UNDECIDED,
+        db_index=True,
+        help_text="Final or current decision for this saved comparison report.",
+    )
+    decision_summary = models.CharField(
+        max_length=240,
+        blank=True,
+        help_text="Short decision statement, such as keep the lead-magnet rules for another two weeks.",
+    )
+    decision_notes = models.TextField(
+        blank=True,
+        help_text="Decision rationale, follow-up actions, risks, or rollback/watch criteria.",
+    )
+    decision_owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="decision_rule_snapshot_comparison_reports_owned",
+        help_text="Person responsible for following up on this report decision.",
+    )
+    decision_recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="decision_rule_snapshot_comparison_report_decisions_recorded",
+        help_text="Staff user who last recorded a report decision.",
+    )
+    decision_recorded_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    snapshots = models.ManyToManyField(
+        ExperimentDecisionTuningExperimentSnapshot,
+        related_name="saved_comparison_reports",
+        blank=True,
+    )
+    preset_keys = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Decision-rule preset keys included when this comparison is rendered.",
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Observations, interpretation, and follow-up decisions for this saved comparison.",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="decision_rule_snapshot_comparison_reports_created",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="decision_rule_snapshot_comparison_reports_updated",
+    )
+
+    class Meta:
+        ordering = ("-updated_at", "-pk")
+        indexes = [
+            models.Index(fields=("title", "updated_at")),
+            models.Index(fields=("decision_status", "updated_at")),
+        ]
+        verbose_name = "decision-rule snapshot comparison report"
+        verbose_name_plural = "decision-rule snapshot comparison reports"
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def snapshot_count(self):
+        return self.snapshots.count()
+
+    @property
+    def preset_count(self):
+        return len(self.preset_keys or [])
+
+    @property
+    def decision_status_css(self):
+        return {
+            self.DecisionStatus.KEEP: "keep",
+            self.DecisionStatus.ROLL_BACK: "rollback",
+            self.DecisionStatus.WATCH: "inconclusive",
+            self.DecisionStatus.ARCHIVED: "neutral",
+        }.get(self.decision_status, "neutral")
+
+    @property
+    def has_recorded_decision(self):
+        return self.decision_status != self.DecisionStatus.UNDECIDED
 
 
 class ResourceCTARecommendationFeedback(TimestampedModel):

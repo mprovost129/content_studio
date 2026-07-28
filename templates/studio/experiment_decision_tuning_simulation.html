@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}Decision-rule simulation{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div>
+        <span class="eyebrow">RECOMMENDATIONS</span>
+        <h1>Decision-rule preset simulation</h1>
+        <p>Compare aggressive growth, conservative quality, balanced learning, and lead-magnet-focused decision rules against an existing experiment snapshot before saving changes.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning' %}">Decision rules</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-history' %}">Decision history</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-experiment-snapshots' %}">Snapshots</a>
+    </div>
+</div>
+
+<form method="post" class="panel form-panel mb-4">
+    {% csrf_token %}
+    <div class="row g-3 align-items-start">
+        <div class="col-md-6">
+            <label class="form-label" for="{{ form.snapshot.id_for_label }}">{{ form.snapshot.label }}</label>
+            {{ form.snapshot }}
+            <div class="form-text">{{ form.snapshot.help_text }}</div>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label">{{ form.preset_keys.label }}</label>
+            <div class="checkbox-grid">{{ form.preset_keys }}</div>
+            <div class="form-text">{{ form.preset_keys.help_text }}</div>
+        </div>
+    </div>
+    <div class="form-actions mt-3"><button class="btn btn-primary" type="submit">Run simulation</button></div>
+</form>
+
+{% if not snapshot %}
+<section class="panel">
+    <h2>No experiment snapshots yet</h2>
+    <p>Create a performance snapshot from a recommendation tuning experiment first, then return here to compare decision-rule presets.</p>
+</section>
+{% endif %}
+
+{% if snapshot %}
+<section class="panel mb-4">
+    <div class="panel-heading">
+        <h2>Simulation snapshot</h2>
+        <a href="{% url 'studio:recommendation-tuning-experiment-snapshot-detail' snapshot.pk %}">Open snapshot</a>
+    </div>
+    <p><strong>{{ snapshot.experiment_label }}</strong> · {{ snapshot.window_days }} day before/after window</p>
+    <p class="text-muted">After window: {{ snapshot.after_start|date:"M j, Y" }} – {{ snapshot.after_end|date:"M j, Y" }}</p>
+</section>
+
+<div class="row g-4">
+    {% for simulation in simulations %}
+    <div class="col-xl-6">
+        <section class="panel h-100">
+            <div class="panel-heading">
+                <div>
+                    <h2>{{ simulation.name }}</h2>
+                    <p class="text-muted mb-0">{{ simulation.description }}</p>
+                </div>
+                {% if simulation.is_active %}<span class="badge text-bg-primary">Current</span>{% endif %}
+            </div>
+            {% with rec=simulation.recommendation %}
+            <div class="alert alert-{{ rec.css_class }}">
+                <strong>{{ rec.label }}</strong> · {{ rec.confidence }} confidence · Score {{ rec.score }}
+                <div>{{ rec.summary }}</div>
+            </div>
+            {% if not simulation.is_active %}
+            <form method="post" action="{% url 'studio:experiment-decision-tuning-preset-apply' %}" class="mb-3">
+                {% csrf_token %}
+                <input type="hidden" name="preset_key" value="{{ simulation.preset_key }}">
+                <input type="hidden" name="next" value="{% url 'studio:experiment-decision-tuning-simulation' %}">
+                <input type="hidden" name="change_reason" value="Applied decision-rule preset after simulation.">
+                <label class="form-label small" for="sim-exp-label-{{ simulation.preset_key }}">Experiment label</label>
+                <input class="form-control form-control-sm mb-2" id="sim-exp-label-{{ simulation.preset_key }}" name="experiment_label" placeholder="Optional test name">
+                <input type="hidden" name="experiment_status" value="running">
+                <label class="form-label small" for="sim-exp-notes-{{ simulation.preset_key }}">Hypothesis / note</label>
+                <textarea class="form-control form-control-sm mb-2" id="sim-exp-notes-{{ simulation.preset_key }}" name="experiment_notes" rows="2" placeholder="Why this preset should improve decisions"></textarea>
+                <button class="btn btn-secondary btn-sm" type="submit">Apply this decision preset</button>
+            </form>
+            {% endif %}
+            <h3>Top weighted signals</h3>
+            {% if rec.weighted_signals %}
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead><tr><th>Signal</th><th>Change</th><th>Weight</th><th>Contribution</th></tr></thead>
+                    <tbody>
+                    {% for signal in rec.weighted_signals|slice:":8" %}
+                        <tr>
+                            <td>{{ signal.section }} · {{ signal.metric }}</td>
+                            <td>{{ signal.change }}</td>
+                            <td>{{ signal.weight }}</td>
+                            <td>{{ signal.contribution }}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-muted">No weighted signal movement detected for this snapshot.</p>
+            {% endif %}
+            {% if rec.positives %}<p class="small"><strong>Positive signals:</strong> {{ rec.positives|join:", " }}</p>{% endif %}
+            {% if rec.negatives %}<p class="small"><strong>Negative signals:</strong> {{ rec.negatives|join:", " }}</p>{% endif %}
+            {% endwith %}
+        </section>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Preset differences from active rules</h2></div>
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead><tr><th>Preset</th><th>Description</th><th>Changed values</th></tr></thead>
+            <tbody>
+                {% for row in preset_rows %}
+                <tr><td><strong>{{ row.preset.name }}</strong></td><td>{{ row.preset.description }}</td><td>{{ row.change_count }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

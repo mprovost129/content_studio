@@ -1,13 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Help and workflow guide
-<section class="panel mt-4">
-    <div class="panel-heading"><h2>Experiment decision rules</h2></div>
-    <p>The experiment decision rules page controls how Studio recommends <strong>keep changes</strong>, <strong>rollback recommended</strong>, or <strong>inconclusive</strong> from a tuning experiment snapshot.</p>
-    <p>Use the thresholds to decide how strong the before/after signal must be, and use the metric weights to emphasize the outcomes that matter most for Code with Michael growth: follower growth, resource downloads, newsletter clicks, CTA clicks, and learner conversions.</p>
-    <p><a href="{% url 'studio:experiment-decision-tuning' %}">Open decision rules</a></p>
-</section>
-
-{% endblock %}
+{% block title %}Help and workflow guide{% endblock %}
 {% block content %}
 <div class="page-heading help-heading">
     <div><span class="eyebrow">OPERATOR GUIDE</span><h1>How to use Content Studio</h1><p>Follow one lesson from an idea to reviewed captions, downloadable graphics, and a website-ready export.</p></div>
@@ -17,6 +9,15 @@
 <nav class="guide-nav panel" aria-label="Guide sections">
     <a href="#daily-workflow">Daily workflow</a><a href="#lesson-details">Lesson details</a><a href="#content-blocks">Content blocks</a><a href="#block-templates">Block templates</a><a href="#social-carousels">Social carousels</a><a href="#graphics">Graphics</a><a href="#captions">Captions</a><a href="#publishing">Publishing</a><a href="#newsletter-campaigns">Email campaigns</a><a href="#provider-readiness">Sync readiness</a><a href="#performance">Reports</a><a href="#website">Website</a><a href="#playground">Playground</a><a href="#status">Statuses</a><a href="#troubleshooting">Troubleshooting</a>
 </nav>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Decision-rule experiments</h2></div>
+    <p>Decision-rule presets can now be applied as named experiments. Add a label and hypothesis when testing Aggressive Growth, Conservative Quality, Balanced Learning, or Lead Magnet Focus, then record the outcome from decision-rule history after reviewing performance.</p>
+    <p><a href="{% url 'studio:experiment-decision-tuning-history' %}">Open decision-rule history</a> · <a href="{% url 'studio:experiment-decision-tuning-experiment-snapshot-compare' %}">Compare decision-rule snapshots</a> · <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-reports' %}">Saved comparison reports</a></p>
+    <p>Use snapshot comparison when you want to inspect several decision-rule experiments or time windows at once. The comparison page shows summary deltas, full metric rows, and keep/rollback/inconclusive recommendations for the active rules plus any selected presets. Save important comparisons as named reports so they can be revisited, annotated, and exported later.</p>
+    <p>Saved comparison reports now include a print-optimized view. Use <strong>Printable report</strong> from a saved report detail page when you need a clean visual summary for a meeting, browser printing, or saving as a PDF.</p>
+    <p>When a report moves from analysis to action, update its report-level decision status to <strong>Keep</strong>, <strong>Roll back</strong>, <strong>Watch</strong>, or <strong>Archived</strong>. Add a short decision summary, owner, and notes so the saved report becomes a durable decision record.</p>
+</section>
 
 <div class="guide-layout">
     <main class="guide-content">

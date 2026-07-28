@@ -1,6 +1,0 @@
-{% extends "base.html" %}
-{% block title %}Brand settings{% endblock %}
-{% block content %}
-<div class="page-heading"><div><span class="eyebrow">DESIGN SYSTEM</span><h1>Brand settings</h1><p>Defaults used by every generated asset.</p></div></div>
-<form method="post" enctype="multipart/form-data" class="panel form-panel narrow-form">{% csrf_token %}{% for field in form %}<div class="field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}</div>{% endfor %}<div class="form-actions"><button class="btn btn-primary" type="submit">Save branding</button></div></form>
-{% endblock %}
