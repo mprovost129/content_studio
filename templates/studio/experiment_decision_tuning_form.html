@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Decision rules{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div>
+        <span class="eyebrow">RECOMMENDATIONS</span>
+        <h1>Experiment decision rules</h1>
+        <p>Adjust the thresholds and metric weights Studio uses when recommending whether to keep, roll back, or mark a tuning experiment as inconclusive.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:recommendation-tuning-experiment-snapshots' %}">Experiment snapshots</a>
+        <a class="btn btn-secondary" href="{% url 'studio:recommendation-tuning-history' %}">Tuning history</a>
+        <a class="btn btn-secondary" href="{% url 'studio:recommendation-tuning' %}">CTA tuning</a>
+    </div>
+</div>
+
+<form method="post" class="panel form-panel">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+
+    <section class="mb-4">
+        <span class="eyebrow">PROFILE</span>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'name' or field.name == 'is_active' or field.name == 'notes' %}
+                <div class="col-md-{% if field.name == 'notes' %}12{% else %}6{% endif %}">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="mb-4">
+        <span class="eyebrow">DECISION THRESHOLDS</span>
+        <p class="text-muted">These values decide when a snapshot is strong enough to produce a keep or rollback recommendation.</p>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'keep_score_threshold' or field.name == 'keep_primary_positive_min' or field.name == 'keep_high_confidence_score' or field.name == 'rollback_score_threshold' or field.name == 'rollback_primary_negative_min' or field.name == 'rollback_high_confidence_score' or field.name == 'low_confidence_abs_score' or field.name == 'max_metric_change_magnitude' %}
+                <div class="col-md-3">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="mb-4">
+        <span class="eyebrow">POSITIVE-SIGNAL WEIGHTS</span>
+        <p class="text-muted">Higher weights make improvements in that metric push the recommendation more strongly toward keep. Declines in these same metrics push toward rollback.</p>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'social_new_followers_weight' or field.name == 'social_engagements_weight' or field.name == 'social_reach_weight' or field.name == 'social_clicks_weight' or field.name == 'resources_pdf_downloads_weight' or field.name == 'resources_pdf_unlocks_weight' or field.name == 'resources_subscribers_weight' or field.name == 'newsletter_clicks_weight' or field.name == 'newsletter_open_rate_weight' or field.name == 'ctas_cta_clicks_weight' or field.name == 'conversions_total_conversions_weight' or field.name == 'conversions_lesson_views_weight' or field.name == 'conversions_quiz_attempts_weight' or field.name == 'conversions_challenge_attempts_weight' or field.name == 'conversions_lesson_completions_weight' %}
+                <div class="col-md-3">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="mb-4">
+        <span class="eyebrow">NEGATIVE-SIGNAL WEIGHTS</span>
+        <p class="text-muted">These weights treat increases in unsubscribes or bounces as negative, while decreases in those metrics help the score.</p>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'newsletter_unsubscribes_penalty_weight' or field.name == 'newsletter_bounces_penalty_weight' %}
+                <div class="col-md-3">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <div class="form-actions">
+        <button class="btn btn-primary" type="submit">Save decision rules</button>
+        <a class="btn btn-secondary" href="{% url 'studio:recommendation-tuning-experiment-snapshots' %}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

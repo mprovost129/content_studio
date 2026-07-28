@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Import Email Metrics{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div>
+        <span class="eyebrow">EMAIL PERFORMANCE</span>
+        <h1>Import email metrics</h1>
+        <p>{% if campaign %}Update performance for <strong>{{ campaign.title }}</strong>.{% else %}Paste or upload campaign metrics from your email platform and apply them to a saved campaign.{% endif %}</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:newsletter-campaign-list' %}"><i class="bi bi-arrow-left"></i> Campaigns</a>
+    </div>
+</div>
+
+<section class="panel">
+    <div class="panel-heading">
+        <h2>Metrics import</h2>
+        <span>Mailchimp, Beehiiv, ConvertKit, CSV, or pasted summary</span>
+    </div>
+    <form method="post" enctype="multipart/form-data" class="studio-form">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        <div class="form-grid">
+            {% for field in form %}
+            <div class="form-field {% if field.name == 'pasted_metrics' or field.name == 'notes' %}form-field--full{% endif %}">
+                <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                {% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="form-actions">
+            <button class="btn btn-primary" type="submit">Import metrics</button>
+            <a class="btn btn-secondary" href="{% url 'studio:newsletter-campaign-list' %}">Cancel</a>
+        </div>
+    </form>
+</section>
+
+<section class="panel">
+    <div class="panel-heading"><h2>Accepted formats</h2><span>Use the export exactly as-is when possible</span></div>
+    <div class="row g-3">
+        <div class="col-md-6">
+            <div class="callout">
+                <strong>CSV row</strong>
+                <pre class="mt-2 mb-0">recipients,opens,clicks,unsubscribes,bounces
+421,212,38,1,0</pre>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="callout">
+                <strong>Copied summary</strong>
+                <pre class="mt-2 mb-0">Recipients: 421
+Opens: 212
+Clicks: 38
+Unsubscribes: 1
+Bounces: 0</pre>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-heading"><h2>Recent imports</h2><span>Last 12</span></div>
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead><tr><th>Campaign</th><th>Provider</th><th>Imported</th><th>Recipients</th><th>Opens</th><th>Clicks</th><th>Warnings</th></tr></thead>
+            <tbody>
+            {% for item in recent_imports %}
+            <tr>
+                <td><a href="{% url 'studio:newsletter-campaign-update' item.campaign.pk %}">{{ item.campaign.title }}</a></td>
+                <td>{{ item.get_provider_display }}</td>
+                <td>{{ item.applied_at|date:"M j, g:i A" }}</td>
+                <td>{{ item.actual_recipients }}</td>
+                <td>{{ item.opens }}</td>
+                <td>{{ item.clicks }}</td>
+                <td>{% if item.warnings %}{{ item.warnings|length }}{% else %}—{% endif %}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7"><div class="empty-state">No metric imports yet.</div></td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

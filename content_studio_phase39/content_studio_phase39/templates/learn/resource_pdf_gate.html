@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Unlock {{ resource.title }} PDF{% endblock %}
+{% block meta_description %}Get the downloadable Code with Michael PDF for {{ resource.title }}.{% endblock %}
+{% block content %}
+<div class="detail-grid">
+    <section class="panel lesson-public">
+        <span class="eyebrow">PDF DOWNLOAD</span>
+        <h1>{{ resource.pdf_lead_magnet_headline|default:resource.title }}</h1>
+        <p class="lead">{{ resource.pdf_lead_magnet_description|default:resource.summary|default:"Enter your email to unlock this beginner Python PDF and get more Code with Michael practice resources." }}</p>
+        <div class="lesson-meta">
+            <span>{{ resource.get_resource_type_display }}</span>
+            <span>{{ resource.get_difficulty_display }}</span>
+            <span>{{ resource.estimated_read_minutes }} min read</span>
+        </div>
+        {% if resource.beginner_tip %}<div class="callout"><strong>Beginner tip:</strong> {{ resource.beginner_tip }}</div>{% endif %}
+        <form method="post" class="panel form-grid" style="margin-top:1rem;">
+            {% csrf_token %}
+            <div style="display:none">{{ form.website }}</div>
+            <p>{{ form.first_name.label_tag }} {{ form.first_name }}</p>
+            <p>{{ form.email.label_tag }} {{ form.email }}</p>
+            {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+            {% for field in form %}{% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}{% endfor %}
+            <button class="btn btn-primary" type="submit">Unlock PDF</button>
+            <a class="btn btn-secondary" href="{{ resource.public_url }}">Back to resource</a>
+        </form>
+        <p class="text-muted small">You will be added to the Code with Michael email list for beginner Python lessons, practice prompts, and resource updates.</p>
+    </section>
+    <aside class="panel output-section">
+        <h2>What you get</h2>
+        <ul>
+            <li>A branded PDF version of this resource</li>
+            <li>A quick beginner reference you can save or print</li>
+            <li>Optional Code with Michael practice updates by email</li>
+        </ul>
+        {% if resource.related_lessons.exists %}
+        <h3>Related lessons</h3>
+        <div class="lesson-list">
+            {% for lesson in resource.related_lessons.all|slice:":4" %}
+            {% if lesson.website_status == 'ready' or lesson.website_status == 'published' %}
+            <a class="lesson-row" href="{% url 'learn:lesson-detail' lesson.slug %}"><strong>{{ lesson.title }}</strong><small>{{ lesson.summary|truncatechars:90 }}</small></a>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+    </aside>
+</div>
+{% endblock %}

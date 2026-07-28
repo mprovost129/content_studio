@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Python Lessons{% endblock %}
+{% block meta_description %}Browse beginner Python lessons by topic, path, difficulty, category, or tag.{% endblock %}
+{% block extra_meta %}
+<meta property="og:type" content="website">
+<meta property="og:title" content="Beginner Python Lessons">
+<meta property="og:description" content="Browse beginner Python lessons, runnable examples, quizzes, and practice challenges.">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta name="twitter:card" content="summary">
+{% endblock %}
+{% block content %}
+<div class="page-heading"><div><span class="eyebrow">LESSONS</span><h1>Python lessons</h1><p>Search beginner lessons by topic, concept, category, or tag.</p></div><a class="btn btn-secondary" href="{% url 'learn:playground' %}">Playground</a></div>
+<form class="filter-bar filter-bar--simple" method="get"><input class="form-control" type="search" name="q" value="{{ request.GET.q }}" placeholder="Search variables, lists, loops, functions..."><button class="btn btn-secondary" type="submit">Search</button></form>
+<section class="learn-card-grid learn-card-grid--wide">
+    {% for lesson in lessons %}<a class="learn-card" href="{% url 'learn:lesson-detail' lesson.slug %}"><span class="status status--{{ lesson.difficulty }}">{{ lesson.get_difficulty_display }}</span><strong>{{ lesson.title }}</strong><p>{{ lesson.summary }}</p><small>{% if lesson.series %}{{ lesson.series.title }}{% if lesson.series_position %} · Lesson {{ lesson.series_position }}{% endif %}{% else %}Standalone lesson{% endif %}</small></a>{% empty %}<div class="empty-state">No lessons match this search.</div>{% endfor %}
+</section>
+{% endblock %}

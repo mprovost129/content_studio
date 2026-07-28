@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Recommendation tuning change history{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">RECOMMENDATIONS</span>
+        <h1>Tuning change history</h1>
+        <p>Audit recommendation-weight changes, preset applications, changed fields, reasons, and the staff user who made each update.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:recommendation-tuning' %}">Tuning controls</a>
+        <a class="btn btn-secondary" href="{% url 'studio:recommendation-tuning-simulation' %}">Simulation</a>
+        <a class="btn btn-secondary" href="{% url 'studio:recommendation-tuning-experiment-snapshots' %}">Snapshots</a>
+        <a class="btn btn-secondary" href="{% url 'studio:recommendation-tuning-history-export' %}?{% if selected_action %}action={{ selected_action }}&{% endif %}{% if selected_experiment_status %}experiment_status={{ selected_experiment_status }}&{% endif %}{% if selected_experiment_outcome %}experiment_outcome={{ selected_experiment_outcome }}&{% endif %}{% if selected_experiment_label %}experiment_label={{ selected_experiment_label|urlencode }}{% endif %}">Export CSV</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-card"><span>Total changes shown</span><strong>{{ total_changes }}</strong></div>
+    <div class="stat-card"><span>Active experiments</span><strong>{{ active_experiments }}</strong></div>
+    <div class="stat-card"><span>Completed outcomes</span><strong>{{ completed_experiments }}</strong></div>
+    <div class="stat-card"><span>Latest change</span><strong>{% if latest_change %}{{ latest_change.created_at|date:"M j" }}{% else %}—{% endif %}</strong></div>
+</section>
+
+<section class="panel mt-4">
+    <form method="get" class="filter-bar">
+        <label>Action
+            <select name="action">
+                <option value="">All actions</option>
+                {% for value, label in actions %}<option value="{{ value }}"{% if selected_action == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>Experiment status
+            <select name="experiment_status">
+                <option value="">All statuses</option>
+                {% for value, label in experiment_statuses %}<option value="{{ value }}"{% if selected_experiment_status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>Outcome
+            <select name="experiment_outcome">
+                <option value="">All outcomes</option>
+                {% for value, label in experiment_outcomes %}<option value="{{ value }}"{% if selected_experiment_outcome == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>Experiment label
+            <input type="search" name="experiment_label" value="{{ selected_experiment_label }}" placeholder="August Instagram growth test">
+        </label>
+        <button class="btn btn-primary" type="submit">Filter</button>
+        <a class="btn btn-secondary" href="{% url 'studio:recommendation-tuning-history' %}">Reset</a>
+    </form>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Change log</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Action</th>
+                    <th>User</th>
+                    <th>Profile / preset</th>
+                    <th>Changed fields</th>
+                    <th>Reason</th>
+                    <th>Restore</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in change_logs %}
+                <tr>
+                    <td>{{ log.created_at|date:"M j, Y g:i A" }}</td>
+                    <td>{{ log.get_action_display }}</td>
+                    <td>{% if log.changed_by %}{{ log.changed_by.email }}{% else %}—{% endif %}</td>
+                    <td><strong>{{ log.tuning.name }}</strong>{% if log.preset_name %}<br><small>Preset: {{ log.preset_name }}</small>{% endif %}</td>
+                    <td>
+                        <strong>{{ log.changed_field_count }}</strong>
+                        {% if log.is_experiment %}<br><small>{{ log.experiment_summary }}</small>{% endif %}
+                        {% if log.diff %}
+                        <details><summary>View fields</summary>
+                            <ul class="compact-list">
+                                {% for field, values in log.diff.items %}
+                                <li><code>{{ field }}</code>: {{ values.before }} → {{ values.after }}</li>
+                                {% endfor %}
+                            </ul>
+                        </details>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if log.reason %}{{ log.reason }}{% else %}<span class="text-muted">No reason entered</span>{% endif %}
+                        {% if log.experiment_notes %}<br><small><strong>Outcome notes:</strong> {{ log.experiment_notes|truncatechars:140 }}</small>{% endif %}
+                    </td>
+                    <td>
+                        <div class="button-stack">
+                            <a class="btn btn-secondary btn-sm" href="{% url 'studio:recommendation-tuning-experiment' log.pk %}">Record outcome</a>
+                            <a class="btn btn-secondary btn-sm" href="{% url 'studio:recommendation-tuning-experiment-snapshot-create' log.pk %}">Create snapshot</a>
+                            <a class="btn btn-secondary btn-sm" href="{% url 'studio:recommendation-tuning-rollback' log.pk %}">Review restore</a>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7">No tuning changes have been recorded yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if is_paginated %}
+    <div class="pagination-row mt-3">
+        {% if page_obj.has_previous %}<a class="btn btn-secondary btn-sm" href="?page={{ page_obj.previous_page_number }}{% if selected_action %}&action={{ selected_action }}{% endif %}">Previous</a>{% endif %}
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a class="btn btn-secondary btn-sm" href="?page={{ page_obj.next_page_number }}{% if selected_action %}&action={{ selected_action }}{% endif %}">Next</a>{% endif %}
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

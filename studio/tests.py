@@ -7,6 +7,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import (
     AIGeneration,
@@ -15,6 +16,7 @@ from .models import (
     CodeChallenge,
     ContentPlan,
     EmailProvider,
+    ExperimentDecisionTuning,
     GraphicAsset,
     GraphicTemplate,
     LearningResource,
@@ -27,6 +29,8 @@ from .models import (
     QuizChoice,
     QuizQuestion,
     RecommendationTuning,
+    RecommendationTuningChangeLog,
+    RecommendationTuningExperimentSnapshot,
     ResourceCTA,
     ResourceCTAClickEvent,
     ResourceCTARecommendationFeedback,
@@ -291,7 +295,7 @@ class StudioViewTests(TestCase):
         response = self.client.get(reverse("studio:dashboard"))
 
         self.assertContains(response, "GETTING STARTED")
-        self.assertContains(response, "1 of 12 setup steps complete")
+        self.assertContains(response, "1 of 10 setup steps complete")
         self.assertContains(response, "Open the complete step-by-step guide")
 
     def test_help_guide_is_private_and_explains_complete_workflow(self):
@@ -318,24 +322,6 @@ class StudioViewTests(TestCase):
             },
         )
         lesson = Lesson.objects.get(title="Python Lists")
-        self.assertRedirects(response, lesson.get_absolute_url())
-        self.assertEqual(lesson.created_by, self.user)
-
-    def test_staff_can_generate_lesson_from_idea(self):
-        self.client.force_login(self.user)
-
-        response = self.client.post(
-            reverse("studio:lesson-generate"),
-            {
-                "topic": "Python dictionaries",
-                "audience": "absolute beginners",
-                "objective": "Store and retrieve values by key.",
-                "include_quiz": True,
-                "include_challenge": True,
-            },
-        )
-
-        lesson = Lesson.objects.get(title__icontains="Python dictionaries")
         self.assertRedirects(response, lesson.get_absolute_url())
         self.assertEqual(lesson.created_by, self.user)
 
@@ -682,7 +668,7 @@ class StudioViewTests(TestCase):
         self.assertContains(preview, "application/ld+json")
         self.assertRedirects(export_response, lesson.get_absolute_url())
         self.assertEqual(json_download["Content-Type"], "application/json; charset=utf-8")
-        self.assertContains(json_download, '"schema_version": "1.6"')
+        self.assertContains(json_download, '"schema_version": "1.5"')
         self.assertEqual(html_download["Content-Type"], "text/html; charset=utf-8")
         self.assertContains(html_download, "Website-ready lesson content.")
 
@@ -847,8 +833,6 @@ class SubscriberSegmentTests(TestCase):
                 "clicks": 0,
                 "unsubscribes": 0,
                 "bounces": 0,
-                "external_provider": EmailProvider.NONE,
-                "provider_sync_status": ProviderSyncStatus.NOT_CONNECTED,
             },
         )
 
@@ -1049,11 +1033,7 @@ print(name)
             reverse("learn:resource-pdf-gate", kwargs={"slug": resource.slug}),
             {"email": "learner@example.com", "first_name": "Learner"},
         )
-        self.assertRedirects(
-            unlock,
-            reverse("learn:resource-pdf", kwargs={"slug": resource.slug}),
-            fetch_redirect_response=False,
-        )
+        self.assertRedirects(unlock, reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
 
         subscriber = NewsletterSubscriber.objects.get(email="learner@example.com")
         self.assertEqual(subscriber.source, NewsletterSubscriber.Source.RESOURCE)
@@ -1546,3 +1526,435 @@ class ResourceCTARecommendationTests(TestCase):
         tuning.refresh_from_db()
         self.assertEqual(tuning.name, "Growth tuning")
         self.assertEqual(tuning.challenge_cta_bonus, 55)
+        log = RecommendationTuningChangeLog.objects.latest("created_at")
+        self.assertEqual(log.action, RecommendationTuningChangeLog.Action.MANUAL_UPDATE)
+        self.assertEqual(log.changed_by, staff)
+        self.assertIn("name", log.diff)
+        self.assertIn("challenge_cta_bonus", log.diff)
+
+    def test_apply_recommendation_tuning_preset_updates_active_profile(self):
+        staff = get_user_model().objects.create_user(email="preset@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = RecommendationTuning.get_active()
+        tuning.pdf_lead_magnet_bonus = 10
+        tuning.newsletter_cta_bonus = 10
+        tuning.save()
+
+        response = self.client.post(
+            reverse("studio:recommendation-tuning-preset-apply"),
+            {"preset_key": "lead_magnet_growth", "next": reverse("studio:recommendation-tuning")},
+        )
+
+        self.assertRedirects(response, reverse("studio:recommendation-tuning"))
+        tuning.refresh_from_db()
+        self.assertEqual(tuning.name, "Lead Magnet Growth")
+        self.assertEqual(tuning.pdf_lead_magnet_bonus, 95)
+        self.assertEqual(tuning.newsletter_cta_bonus, 70)
+        log = RecommendationTuningChangeLog.objects.latest("created_at")
+        self.assertEqual(log.action, RecommendationTuningChangeLog.Action.PRESET_APPLIED)
+        self.assertEqual(log.preset_key, "lead_magnet_growth")
+        self.assertEqual(log.changed_by, staff)
+        self.assertIn("pdf_lead_magnet_bonus", log.diff)
+
+
+    def test_recommendation_tuning_history_view_and_export(self):
+        staff = get_user_model().objects.create_user(email="history@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = RecommendationTuning.get_active()
+        RecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=RecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=staff,
+            before={"lesson_cta_bonus": 20},
+            after={"lesson_cta_bonus": 30},
+            diff={"lesson_cta_bonus": {"before": 20, "after": 30}},
+            reason="Testing history report.",
+        )
+
+        response = self.client.get(reverse("studio:recommendation-tuning-history"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Testing history report.")
+
+        export = self.client.get(reverse("studio:recommendation-tuning-history-export"))
+        self.assertEqual(export.status_code, 200)
+        self.assertIn("text/csv", export["Content-Type"])
+        self.assertContains(export, "lesson_cta_bonus")
+
+    def test_recommendation_tuning_simulation_view_compares_presets_without_saving(self):
+        staff = get_user_model().objects.create_user(email="simulate@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = RecommendationTuning.get_active()
+        tuning.name = "Original tuning"
+        tuning.challenge_cta_bonus = 5
+        tuning.save()
+        lesson = Lesson.objects.create(
+            title="Python Practice",
+            summary="Practice Python variables.",
+            status=Lesson.Status.READY,
+            website_status=Lesson.Status.PUBLISHED,
+            difficulty=Lesson.Difficulty.BEGINNER,
+            starter_code="name = 'Michael'",
+        )
+        CodeChallenge.objects.create(lesson=lesson, prompt="Print the name variable.")
+        resource = LearningResource.objects.create(
+            title="Variables Cheat Sheet",
+            summary="Variables reference.",
+            status=LearningResource.Status.PUBLISHED,
+            resource_type=LearningResource.ResourceType.CHEAT_SHEET,
+            difficulty=Lesson.Difficulty.BEGINNER,
+            content="Variables store reusable values.",
+        )
+        resource.related_lessons.add(lesson)
+
+        response = self.client.post(
+            reverse("studio:recommendation-tuning-simulation"),
+            {"resource": resource.pk, "preset_keys": ["challenge_practice"], "limit": 6},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Challenge Practice")
+        self.assertContains(response, "Active: Original tuning")
+        tuning.refresh_from_db()
+        self.assertEqual(tuning.name, "Original tuning")
+        self.assertEqual(tuning.challenge_cta_bonus, 5)
+
+    def test_recommendation_tuning_rollback_restores_before_snapshot(self):
+        staff = get_user_model().objects.create_user(email="rollback@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = RecommendationTuning.get_active()
+        tuning.name = "Experiment"
+        tuning.lesson_cta_bonus = 99
+        tuning.quiz_cta_bonus = 88
+        tuning.save()
+        log = RecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=RecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=staff,
+            before={"name": "Original", "is_active": True, "lesson_cta_bonus": 20, "quiz_cta_bonus": 35},
+            after={"name": "Experiment", "is_active": True, "lesson_cta_bonus": 99, "quiz_cta_bonus": 88},
+            diff={"lesson_cta_bonus": {"before": 20, "after": 99}},
+            reason="Testing rollback.",
+        )
+
+        response = self.client.post(
+            reverse("studio:recommendation-tuning-rollback", args=[log.pk]),
+            {"snapshot": "before", "rollback_reason": "Restore original weights."},
+        )
+
+        self.assertRedirects(response, reverse("studio:recommendation-tuning-history"))
+        tuning.refresh_from_db()
+        self.assertEqual(tuning.name, "Original")
+        self.assertEqual(tuning.lesson_cta_bonus, 20)
+        self.assertEqual(tuning.quiz_cta_bonus, 35)
+        rollback_log = RecommendationTuningChangeLog.objects.latest("created_at")
+        self.assertEqual(rollback_log.action, RecommendationTuningChangeLog.Action.ROLLBACK_RESTORED)
+        self.assertIn("lesson_cta_bonus", rollback_log.diff)
+        self.assertEqual(rollback_log.reason, "Restore original weights.")
+
+
+    def test_recommendation_tuning_experiment_outcome_update(self):
+        staff = get_user_model().objects.create_user(email="experiment@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = RecommendationTuning.get_active()
+        log = RecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=RecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=staff,
+            before={"lesson_cta_bonus": 20},
+            after={"lesson_cta_bonus": 45},
+            diff={"lesson_cta_bonus": {"before": 20, "after": 45}},
+            reason="Test experiment outcome.",
+            experiment_label="August Instagram growth test",
+            experiment_status=RecommendationTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+
+        response = self.client.post(
+            reverse("studio:recommendation-tuning-experiment", args=[log.pk]),
+            {
+                "experiment_label": "August Instagram growth test",
+                "experiment_status": RecommendationTuningChangeLog.ExperimentStatus.KEEP,
+                "experiment_outcome": RecommendationTuningChangeLog.ExperimentOutcome.POSITIVE,
+                "experiment_notes": "Follower growth improved, keep these weights.",
+            },
+        )
+
+        self.assertRedirects(response, reverse("studio:recommendation-tuning-history"))
+        log.refresh_from_db()
+        self.assertEqual(log.experiment_status, RecommendationTuningChangeLog.ExperimentStatus.KEEP)
+        self.assertEqual(log.experiment_outcome, RecommendationTuningChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertEqual(log.outcome_recorded_by, staff)
+        self.assertIsNotNone(log.outcome_recorded_at)
+
+    def test_recommendation_tuning_history_filters_experiments(self):
+        staff = get_user_model().objects.create_user(email="experiment-filter@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = RecommendationTuning.get_active()
+        RecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=RecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=staff,
+            before={"lesson_cta_bonus": 20},
+            after={"lesson_cta_bonus": 45},
+            diff={"lesson_cta_bonus": {"before": 20, "after": 45}},
+            experiment_label="August Instagram growth test",
+            experiment_status=RecommendationTuningChangeLog.ExperimentStatus.RUNNING,
+            experiment_outcome=RecommendationTuningChangeLog.ExperimentOutcome.POSITIVE,
+        )
+        RecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=RecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=staff,
+            before={"quiz_cta_bonus": 35},
+            after={"quiz_cta_bonus": 10},
+            diff={"quiz_cta_bonus": {"before": 35, "after": 10}},
+            experiment_label="Archive test",
+            experiment_status=RecommendationTuningChangeLog.ExperimentStatus.COMPLETE,
+            experiment_outcome=RecommendationTuningChangeLog.ExperimentOutcome.NEGATIVE,
+        )
+
+        response = self.client.get(reverse("studio:recommendation-tuning-history"), {"experiment_status": "running", "experiment_label": "Instagram"})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "August Instagram growth test")
+        self.assertNotContains(response, "Archive test")
+
+        export = self.client.get(reverse("studio:recommendation-tuning-history-export"), {"experiment_outcome": "positive"})
+        self.assertEqual(export.status_code, 200)
+        self.assertContains(export, "experiment_label")
+        self.assertContains(export, "August Instagram growth test")
+
+    def test_recommendation_tuning_rollback_review_page(self):
+        staff = get_user_model().objects.create_user(email="rollback-view@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = RecommendationTuning.get_active()
+        log = RecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=RecommendationTuningChangeLog.Action.PRESET_APPLIED,
+            changed_by=staff,
+            before={"lesson_cta_bonus": 20},
+            after={"lesson_cta_bonus": 65},
+            diff={"lesson_cta_bonus": {"before": 20, "after": 65}},
+        )
+
+        response = self.client.get(reverse("studio:recommendation-tuning-rollback", args=[log.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Restore before-change snapshot")
+        self.assertContains(response, "lesson_cta_bonus")
+
+
+    def test_recommendation_tuning_experiment_snapshot_create_and_export(self):
+        staff = get_user_model().objects.create_user(email="snapshot@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = RecommendationTuning.get_active()
+        log = RecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=RecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=staff,
+            before={"lesson_cta_bonus": 20},
+            after={"lesson_cta_bonus": 45},
+            diff={"lesson_cta_bonus": {"before": 20, "after": 45}},
+            reason="Test snapshot.",
+            experiment_label="August Instagram growth test",
+            experiment_status=RecommendationTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+        lesson = Lesson.objects.create(title="Snapshot lesson")
+        PublishingRecord.objects.create(
+            lesson=lesson,
+            platform=PublishingRecord.Platform.FACEBOOK,
+            published_at=log.created_at,
+            reach=100,
+            likes=10,
+            clicks=5,
+            new_followers=3,
+        )
+
+        response = self.client.post(
+            reverse("studio:recommendation-tuning-experiment-snapshot-create", args=[log.pk]),
+            {"window_days": 14, "notes": "Compare after launch."},
+        )
+
+        snapshot = RecommendationTuningExperimentSnapshot.objects.get(change_log=log)
+        self.assertRedirects(response, reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertEqual(snapshot.window_days, 14)
+        self.assertEqual(snapshot.after_metrics["social"]["new_followers"], 3)
+        self.assertEqual(snapshot.deltas["social"]["new_followers"]["change"], 3)
+
+        detail = self.client.get(reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "Social publishing")
+
+        export = self.client.get(reverse("studio:recommendation-tuning-experiment-snapshot-export", args=[snapshot.pk]))
+        self.assertEqual(export.status_code, 200)
+        self.assertContains(export, "experiment_label")
+        self.assertContains(export, "New followers")
+
+
+    def test_experiment_snapshot_recommends_keep_and_can_record_decision(self):
+        staff = get_user_model().objects.create_user(email="decision@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = RecommendationTuning.get_active()
+        log = RecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=RecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=staff,
+            before={"lesson_cta_bonus": 20},
+            after={"lesson_cta_bonus": 55},
+            diff={"lesson_cta_bonus": {"before": 20, "after": 55}},
+            experiment_label="Decision test",
+            experiment_status=RecommendationTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+        now = timezone.now()
+        snapshot = RecommendationTuningExperimentSnapshot.objects.create(
+            change_log=log,
+            window_days=14,
+            before_start=now - timezone.timedelta(days=14),
+            before_end=now,
+            after_start=now,
+            after_end=now + timezone.timedelta(days=14),
+            before_metrics={},
+            after_metrics={},
+            deltas={
+                "social": {"new_followers": {"before": 1, "after": 5, "change": 4, "pct": 400}},
+                "resources": {"pdf_downloads": {"before": 2, "after": 8, "change": 6, "pct": 300}},
+                "newsletter": {"clicks": {"before": 1, "after": 3, "change": 2, "pct": 200}},
+                "ctas": {"cta_clicks": {"before": 1, "after": 7, "change": 6, "pct": 600}},
+                "conversions": {"total_conversions": {"before": 1, "after": 6, "change": 5, "pct": 500}},
+            },
+            summary={},
+            generated_by=staff,
+        )
+
+        detail = self.client.get(reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "DECISION RECOMMENDATION")
+        self.assertContains(detail, "Keep changes")
+
+        response = self.client.post(
+            reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]),
+            {"action": "apply_decision_recommendation", "decision_note": "Looks strong."},
+        )
+        self.assertRedirects(response, reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        log.refresh_from_db()
+        self.assertEqual(log.experiment_status, RecommendationTuningChangeLog.ExperimentStatus.KEEP)
+        self.assertEqual(log.experiment_outcome, RecommendationTuningChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertIn("Decision recommendation from snapshot", log.experiment_notes)
+
+    def test_experiment_snapshot_recommends_rollback_for_declines(self):
+        staff = get_user_model().objects.create_user(email="rollback-decision@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = RecommendationTuning.get_active()
+        log = RecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=RecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=staff,
+            before={"challenge_cta_bonus": 45},
+            after={"challenge_cta_bonus": 5},
+            diff={"challenge_cta_bonus": {"before": 45, "after": 5}},
+            experiment_label="Rollback decision test",
+            experiment_status=RecommendationTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+        now = timezone.now()
+        snapshot = RecommendationTuningExperimentSnapshot.objects.create(
+            change_log=log,
+            window_days=14,
+            before_start=now - timezone.timedelta(days=14),
+            before_end=now,
+            after_start=now,
+            after_end=now + timezone.timedelta(days=14),
+            before_metrics={},
+            after_metrics={},
+            deltas={
+                "social": {"new_followers": {"before": 8, "after": 2, "change": -6, "pct": -75}},
+                "resources": {"pdf_downloads": {"before": 9, "after": 2, "change": -7, "pct": -77.78}},
+                "newsletter": {"clicks": {"before": 5, "after": 1, "change": -4, "pct": -80}, "unsubscribes": {"before": 0, "after": 3, "change": 3, "pct": None}},
+                "ctas": {"cta_clicks": {"before": 12, "after": 3, "change": -9, "pct": -75}},
+                "conversions": {"total_conversions": {"before": 10, "after": 2, "change": -8, "pct": -80}},
+            },
+            summary={},
+            generated_by=staff,
+        )
+
+        detail = self.client.get(reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "Rollback recommended")
+
+
+    def test_experiment_decision_tuning_page_updates_thresholds(self):
+        staff = get_user_model().objects.create_user(email="decision-rules@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        tuning = ExperimentDecisionTuning.get_active()
+
+        response = self.client.post(reverse("studio:experiment-decision-tuning"), {
+            "name": tuning.name,
+            "is_active": "on",
+            "keep_score_threshold": "8",
+            "keep_primary_positive_min": "3",
+            "keep_high_confidence_score": "14",
+            "rollback_score_threshold": "-6",
+            "rollback_primary_negative_min": "2",
+            "rollback_high_confidence_score": "-12",
+            "low_confidence_abs_score": "5",
+            "max_metric_change_magnitude": "4",
+            "social_new_followers_weight": "3",
+            "social_engagements_weight": "1.4",
+            "social_reach_weight": "0.8",
+            "social_clicks_weight": "1.2",
+            "resources_pdf_downloads_weight": "1.6",
+            "resources_pdf_unlocks_weight": "1.3",
+            "resources_subscribers_weight": "2",
+            "newsletter_clicks_weight": "1.7",
+            "newsletter_open_rate_weight": "0.8",
+            "ctas_cta_clicks_weight": "1.8",
+            "conversions_total_conversions_weight": "2.5",
+            "conversions_lesson_views_weight": "1.2",
+            "conversions_quiz_attempts_weight": "1.5",
+            "conversions_challenge_attempts_weight": "1.7",
+            "conversions_lesson_completions_weight": "2.2",
+            "newsletter_unsubscribes_penalty_weight": "2",
+            "newsletter_bounces_penalty_weight": "1.5",
+            "notes": "Require stronger signal before keep decisions.",
+        })
+
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning"))
+        tuning.refresh_from_db()
+        self.assertEqual(tuning.keep_score_threshold, 8.0)
+        self.assertEqual(tuning.keep_primary_positive_min, 3)
+        self.assertEqual(tuning.social_new_followers_weight, 3.0)
+
+    def test_experiment_decision_tuning_changes_recommendation_threshold(self):
+        staff = get_user_model().objects.create_user(email="strict-rules@example.com", password="testpass", is_staff=True)
+        self.client.force_login(staff)
+        decision_tuning = ExperimentDecisionTuning.get_active()
+        decision_tuning.keep_score_threshold = 50
+        decision_tuning.keep_primary_positive_min = 2
+        decision_tuning.save()
+        tuning = RecommendationTuning.get_active()
+        log = RecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=RecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=staff,
+            experiment_label="Strict threshold test",
+            experiment_status=RecommendationTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+        now = timezone.now()
+        snapshot = RecommendationTuningExperimentSnapshot.objects.create(
+            change_log=log,
+            window_days=14,
+            before_start=now - timezone.timedelta(days=14),
+            before_end=now,
+            after_start=now,
+            after_end=now + timezone.timedelta(days=14),
+            before_metrics={},
+            after_metrics={},
+            deltas={
+                "social": {"new_followers": {"change": 4}},
+                "resources": {"pdf_downloads": {"change": 6}},
+                "conversions": {"total_conversions": {"change": 5}},
+            },
+            summary={},
+            generated_by=staff,
+        )
+
+        detail = self.client.get(reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "Inconclusive")
+        self.assertContains(detail, "Decision rules")

@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block title %}Delete content plan{% endblock %}
+{% block content %}
+<div class="auth-shell"><form method="post" class="auth-card">{% csrf_token %}<span class="eyebrow">DELETE PLAN</span><h1>Delete this planned post?</h1><p>{{ object.lesson }} · {{ object.get_platform_display }} · {{ object.scheduled_at|date:"M j, Y g:i A" }}</p><div class="form-actions"><button class="btn btn-danger" type="submit">Delete</button><a class="btn btn-secondary" href="{% url 'studio:content-planner' %}?week={{ object.week_start|date:'Y-m-d' }}">Cancel</a></div></form></div>
+{% endblock %}

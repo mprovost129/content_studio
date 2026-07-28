@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Delete Segment{% endblock %}
+{% block content %}
+<div class="page-heading"><div><span class="eyebrow">EMAIL AUDIENCE</span><h1>Delete segment</h1><p>This removes the saved rules. It does not delete subscribers or past campaign records.</p></div></div>
+<section class="panel">
+    <form method="post">{% csrf_token %}<p>Delete <strong>{{ object.name }}</strong>?</p><div class="form-actions"><button class="btn btn-danger" type="submit">Delete segment</button><a class="btn btn-secondary" href="{% url 'studio:subscriber-segment-list' %}">Cancel</a></div></form>
+</section>
+{% endblock %}

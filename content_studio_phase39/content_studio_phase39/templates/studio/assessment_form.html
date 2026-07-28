@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ form_title|default:"Assessment" }}{% endblock %}
+{% block content %}
+<div class="page-heading">
+    <div>
+        <span class="eyebrow">{{ lesson.title }}</span>
+        <h1>{{ form_title|default:"Assessment" }}</h1>
+        <p>Create structured quizzes and coding challenges that can be reused on the public learning site.</p>
+    </div>
+    <a class="btn btn-secondary" href="{{ lesson.get_absolute_url }}#assessments">Back to lesson</a>
+</div>
+<section class="panel form-panel">
+    <form method="post">
+        {% csrf_token %}
+        <div class="form-grid">{{ form.as_p }}</div>
+        <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+</section>
+{% endblock %}

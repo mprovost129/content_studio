@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{{ lesson.seo_title|default:lesson.title }}{% endblock %}
+{% block meta_description %}{{ lesson.seo_description|default:lesson.summary }}{% endblock %}
+{% block extra_meta %}
+<meta property="og:type" content="article">
+<meta property="og:title" content="{{ lesson.seo_title|default:lesson.title }}">
+<meta property="og:description" content="{{ lesson.seo_description|default:lesson.summary }}">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta name="twitter:card" content="summary">
+{% endblock %}
+{% block content %}
+<div{% if page.playground_enabled %} data-python-worker="{% static 'js/pyodide-worker.js' %}"{% endif %}></div>
+<article class="public-lesson">
+    <header class="public-lesson__hero panel">
+        <span class="eyebrow">{% if lesson.series %}{{ lesson.series.title }}{% else %}Python lesson{% endif %}</span>
+        <h1>{{ lesson.title }}</h1>
+        <p>{{ lesson.summary }}</p>
+        <div class="lesson-meta"><span class="pill">{{ lesson.get_difficulty_display }}</span>{% if lesson.category %}<span class="pill">{{ lesson.category }}</span>{% endif %}{% if page.playground_enabled %}<span class="pill">Runnable code</span>{% endif %}{% if progress and progress.status == 'completed' %}<span class="pill">Completed</span>{% endif %}</div>
+        <div class="heading-actions mt-3">
+            {% if user.is_authenticated %}
+            <form method="post" action="{% url 'learn:lesson-complete' lesson.slug %}">{% csrf_token %}<button class="btn btn-primary" type="submit">{% if progress and progress.status == 'completed' %}Completed ✓{% else %}Mark lesson complete{% endif %}</button></form>
+            <a class="btn btn-secondary" href="{% url 'learn:dashboard' %}">My progress</a>
+            {% else %}
+            <a class="btn btn-primary" href="{% url 'users:signup' %}">Create account to save progress</a>
+            <a class="btn btn-secondary" href="{% url 'login' %}">Log in</a>
+            {% endif %}
+        </div>
+    </header>
+    {% if lesson.learning_objective or lesson.beginner_takeaway or lesson.common_mistake or lesson.practice_prompt %}
+    <section class="learning-card public-card">
+        {% if lesson.learning_objective %}<div><strong>Goal:</strong> {{ lesson.learning_objective }}</div>{% endif %}
+        {% if lesson.beginner_takeaway %}<div><strong>Remember:</strong> {{ lesson.beginner_takeaway }}</div>{% endif %}
+        {% if lesson.common_mistake %}<div><strong>Common mistake:</strong> {{ lesson.common_mistake|linebreaksbr }}</div>{% endif %}
+        {% if lesson.practice_prompt %}<div><strong>Try it:</strong> {{ lesson.practice_prompt|linebreaksbr }}</div>{% endif %}
+    </section>
+    {% endif %}
+    <div class="public-lesson__layout">
+        <main class="lesson-body public-body">
+            {% for block in lesson.blocks.all %}
+            <section class="lesson-block block-{{ block.block_type }}">
+                {% if block.title %}<h2>{{ block.title }}</h2>{% endif %}
+                {% if block.block_type == 'code' and page.playground_enabled %}
+                <div class="python-playground" data-python-playground{% if lesson.expected_output %} data-expected-output="{{ lesson.expected_output|escape }}"{% endif %}>
+                    <textarea class="python-editor" data-python-editor aria-label="Editable Python code" spellcheck="false">{{ block.content }}</textarea>
+                    <div class="playground-controls"><button type="button" data-python-run>Run code</button><button type="button" data-python-stop disabled>Stop</button><button type="button" data-python-reset>Reset</button><small>Ctrl+Enter to run</small></div>
+                    <pre class="python-output" data-python-output aria-live="polite">Select Run code or press Ctrl+Enter.</pre>
+                </div>
+                {% elif block.block_type == 'code' or block.block_type == 'output' %}<pre><code>{{ block.content }}</code></pre>
+                {% else %}{{ block.content|linebreaks }}{% if block.block_type == 'quiz' and block.data %}<details class="answer-detail"><summary>Show answer / explanation</summary><pre>{{ block.data }}</pre></details>{% endif %}{% endif %}
+            </section>
+            {% endfor %}
+
+            {% if lesson.quiz_questions.all or lesson.code_challenges.all %}
+            <section class="lesson-block structured-practice" id="practice">
+                <h2>Practice</h2>
+                {% for question in lesson.quiz_questions.all %}{% if question.is_active %}
+                <article class="public-quiz-card" data-quiz-card{% if user.is_authenticated %} data-submit-url="{% url 'learn:quiz-submit' question.pk %}"{% endif %}>
+                    <span class="eyebrow">Question {{ question.position }}</span>
+                    <h3>{{ question.prompt|linebreaksbr }}</h3>
+                    {% if question.choices.all %}
+                    <div class="public-choice-list">
+                        {% for choice in question.choices.all %}
+                        <button type="button" data-quiz-choice data-choice-id="{{ choice.pk }}" data-correct="{{ choice.is_correct|yesno:'true,false' }}">{{ choice.text }}</button>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    <p class="quiz-feedback" data-quiz-feedback aria-live="polite">{% if not user.is_authenticated %}Log in to save quiz attempts.{% endif %}</p>
+                    {% if question.explanation %}<details class="answer-detail"><summary>Show explanation</summary><p>{{ question.explanation|linebreaksbr }}</p></details>{% endif %}
+                </article>
+                {% endif %}{% endfor %}
+
+                {% for challenge in lesson.code_challenges.all %}{% if challenge.is_active %}
+                <article class="public-challenge-card">
+                    <span class="eyebrow">Challenge {{ challenge.position }}</span>
+                    <h3>{{ challenge.title }}</h3>
+                    <p>{{ challenge.prompt|linebreaksbr }}</p>
+                    {% if page.playground_enabled %}
+                    <script type="application/json" data-challenge-tests>{{ challenge.active_test_cases_json|safe }}</script>
+                    <div class="python-playground" data-python-playground data-validation-mode="{{ challenge.validation_mode }}"{% if challenge.expected_output %} data-expected-output="{{ challenge.expected_output|escape }}"{% endif %}{% if user.is_authenticated %} data-challenge-submit-url="{% url 'learn:challenge-submit' challenge.pk %}"{% endif %}>
+                        <textarea class="python-editor" data-python-editor aria-label="Editable Python challenge code" spellcheck="false">{{ challenge.starter_code|default:lesson.starter_code }}</textarea>
+                        <div class="playground-controls"><button type="button" data-python-run>Run code</button><button type="button" data-python-stop disabled>Stop</button><button type="button" data-python-reset>Reset</button>{% if challenge.test_cases.all %}<button type="button" data-python-run-tests>Run tests</button>{% endif %}{% if user.is_authenticated %}<button type="button" data-python-save-attempt disabled>Save attempt</button>{% endif %}<small>Ctrl+Enter to run</small></div>
+                        <pre class="python-output" data-python-output aria-live="polite">Select Run code or press Ctrl+Enter.</pre>
+                    </div>
+                    {% elif challenge.starter_code %}<pre><code>{{ challenge.starter_code }}</code></pre>{% endif %}
+                    {% if challenge.test_cases.all %}<details class="answer-detail"><summary>What gets checked?</summary><ol>{% for test_case in challenge.test_cases.all %}{% if test_case.is_active %}<li><strong>{{ test_case.name|default:"Test case" }}</strong>{% if test_case.description %}: {{ test_case.description }}{% endif %}</li>{% endif %}{% endfor %}</ol></details>{% endif %}
+                    {% if challenge.hint_1 or challenge.hint_2 %}<details class="answer-detail"><summary>Show hints</summary>{% if challenge.hint_1 %}<p>1. {{ challenge.hint_1 }}</p>{% endif %}{% if challenge.hint_2 %}<p>2. {{ challenge.hint_2 }}</p>{% endif %}</details>{% endif %}
+                    {% if challenge.solution_code %}<details class="answer-detail"><summary>Show solution</summary><pre><code>{{ challenge.solution_code }}</code></pre>{% if challenge.expected_output %}<h4>Expected output</h4><pre><code>{{ challenge.expected_output }}</code></pre>{% endif %}</details>{% endif %}
+                </article>
+                {% endif %}{% endfor %}
+            </section>
+            {% endif %}
+
+            {% if lesson_challenge_attempts %}
+            <section class="lesson-block structured-practice" id="my-submissions">
+                <h2>My code submissions for this lesson</h2>
+                <div class="lesson-list">
+                    {% for attempt in lesson_challenge_attempts %}
+                    <a class="lesson-row" href="{% url 'learn:challenge-attempt-detail' attempt.pk %}">
+                        <span class="color-dot" style="--dot: {% if attempt.passed %}#22c55e{% else %}#64748b{% endif %}"></span>
+                        <span class="lesson-row__main"><strong>{{ attempt.challenge.title }}</strong><small>{% if attempt.tests_total %}{{ attempt.tests_passed }}/{{ attempt.tests_total }} tests{% elif attempt.passed %}Passed{% else %}Saved for review{% endif %} · {{ attempt.created_at|date:"M j, Y g:i A" }}</small></span>
+                    </a>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+        </main>
+        <aside class="public-sidebar">
+            {% if lesson.starter_code %}<section class="panel action-panel"><span class="eyebrow">STARTER</span><h2>Starter code</h2><pre><code>{{ lesson.starter_code }}</code></pre></section>{% endif %}
+            {% if lesson.hint_1 or lesson.hint_2 %}<section class="panel action-panel"><span class="eyebrow">HINTS</span><h2>Need a nudge?</h2>{% if lesson.hint_1 %}<p>1. {{ lesson.hint_1 }}</p>{% endif %}{% if lesson.hint_2 %}<p>2. {{ lesson.hint_2 }}</p>{% endif %}</section>{% endif %}
+            {% if lesson.solution_code %}<section class="panel action-panel"><details class="code-detail"><summary>Show solution</summary><pre><code>{{ lesson.solution_code }}</code></pre>{% if lesson.expected_output %}<h3>Expected output</h3><pre><code>{{ lesson.expected_output }}</code></pre>{% endif %}</details></section>{% endif %}
+            {% if lesson.next_lesson %}<section class="panel action-panel"><span class="eyebrow">NEXT</span><h2>Keep going</h2><p><a href="{% url 'learn:lesson-detail' lesson.next_lesson.slug %}">{{ lesson.next_lesson.title }}</a></p></section>{% endif %}
+        </aside>
+    </div>
+</article>
+{% include "includes/newsletter_signup.html" %}
+{% if page.playground_enabled %}<script src="{% static 'js/playground.js' %}" defer></script>{% endif %}
+{% endblock %}
