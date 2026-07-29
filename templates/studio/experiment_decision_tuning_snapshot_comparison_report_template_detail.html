@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ report_template.title }}{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">REPORT TEMPLATE</span>
+        <h1>{{ report_template.title }}</h1>
+        <p>{{ report_template.description|default:"Reusable decision-rule comparison structure." }}</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-primary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-from-template' report_template.slug %}">Create report from template</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-update' report_template.slug %}">Edit</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations' %}">Recommendations</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}?template_type={{ report_template.template_type }}">Usage</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-templates' %}">Templates</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-card"><span>Type</span><strong>{{ report_template.get_template_type_display }}</strong></div>
+    <div class="stat-card"><span>Recommended snapshots</span><strong>{{ report_template.recommended_snapshot_count }}</strong></div>
+    <div class="stat-card"><span>Window</span><strong>{{ report_template.recommended_window_days }}d</strong></div>
+    <div class="stat-card"><span>Presets</span><strong>{{ report_template.preset_count }}</strong></div>
+    <div class="stat-card"><span>Generated reports</span><strong>{{ report_template.generated_reports.count }}</strong></div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Report defaults</h2></div>
+    <p><strong>Title seed:</strong> {{ report_template.default_report_title|default:report_template.title }}</p>
+    <p><strong>Description:</strong> {{ report_template.default_description|default:report_template.description|default:"None" }}</p>
+    <p><strong>Default notes:</strong><br>{{ report_template.default_notes|default:"None"|linebreaksbr }}</p>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Focus areas</h2></div>
+    {% if report_template.focus_areas %}
+    <ul>{% for area in report_template.focus_areas %}<li>{{ area }}</li>{% endfor %}</ul>
+    {% else %}<p class="muted">No focus areas listed.</p>{% endif %}
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Suggested recent snapshots</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Snapshot</th><th>Window</th><th>Generated</th></tr></thead>
+            <tbody>
+                {% for snapshot in suggested_snapshots %}
+                <tr><td>{{ snapshot.experiment_label }}</td><td>{{ snapshot.window_days }} days</td><td>{{ snapshot.generated_at|date:"M j, Y" }}</td></tr>
+                {% empty %}<tr><td colspan="3">No snapshots available yet.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

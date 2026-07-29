@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Report template usage{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">REPORT TEMPLATES</span>
+        <h1>Template usage analytics</h1>
+        <p>See which saved-report templates are creating comparison reports and which template families lead to Keep, Roll back, Watch, or Archived decisions.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-primary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage-export' %}?{{ request.GET.urlencode }}">Export CSV</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations' %}">Recommendations</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-templates' %}">Report templates</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-reports' %}">Saved reports</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-card"><span>Templates</span><strong>{{ total_templates }}</strong></div>
+    <div class="stat-card"><span>Active templates</span><strong>{{ active_templates }}</strong></div>
+    <div class="stat-card"><span>Generated reports</span><strong>{{ total_reports }}</strong></div>
+    <div class="stat-card"><span>Keep / Roll back / Watch</span><strong>{{ total_keep }} / {{ total_roll_back }} / {{ total_watch }}</strong></div>
+</section>
+
+<section class="panel mt-4">
+    <form method="get" class="filter-bar">
+        <label>Template type
+            <select name="template_type">
+                <option value="">All types</option>
+                {% for value,label in template_type_choices %}
+                <option value="{{ value }}" {% if value == template_type %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Template status
+            <select name="active">
+                <option value="">All</option>
+                <option value="yes" {% if active == "yes" %}selected{% endif %}>Active</option>
+                <option value="no" {% if active == "no" %}selected{% endif %}>Inactive</option>
+            </select>
+        </label>
+        <label>Report decision
+            <select name="decision_status">
+                <option value="">All decisions</option>
+                {% for value,label in decision_status_choices %}
+                <option value="{{ value }}" {% if value == decision_status %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button class="btn btn-primary" type="submit">Filter</button>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}">Reset</a>
+    </form>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Usage by template</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Template</th>
+                    <th>Reports</th>
+                    <th>Keep</th>
+                    <th>Roll back</th>
+                    <th>Watch</th>
+                    <th>Archived</th>
+                    <th>Undecided</th>
+                    <th>Avg snapshots</th>
+                    <th>Last generated report</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    <td>
+                        <strong><a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-detail' row.template.slug %}">{{ row.template.title }}</a></strong><br>
+                        <small>{{ row.template.get_template_type_display }} · {% if row.template.is_active %}Active{% else %}Inactive{% endif %}</small>
+                    </td>
+                    <td>{{ row.total_reports }}</td>
+                    <td>{{ row.keep_count }}</td>
+                    <td>{{ row.roll_back_count }}</td>
+                    <td>{{ row.watch_count }}</td>
+                    <td>{{ row.archived_count }}</td>
+                    <td>{{ row.undecided_count }}</td>
+                    <td>{{ row.avg_snapshots }}</td>
+                    <td>
+                        {% if row.last_report %}
+                        <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-detail' row.last_report.pk %}">{{ row.last_report.title }}</a><br>
+                        <small>{{ row.last_report.updated_at|date:"M j, Y" }}</small>
+                        {% else %}
+                        <span class="muted">No reports yet</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="9">No template usage found for the selected filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Usage by template family</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Template family</th><th>Templates</th><th>Reports</th><th>Keep</th><th>Roll back</th><th>Watch</th><th>Archived</th><th>Undecided</th></tr></thead>
+            <tbody>
+                {% for row in type_rows %}
+                <tr>
+                    <td><strong>{{ row.label }}</strong></td>
+                    <td>{{ row.template_count }}</td>
+                    <td>{{ row.total_reports }}</td>
+                    <td>{{ row.keep_count }}</td>
+                    <td>{{ row.roll_back_count }}</td>
+                    <td>{{ row.watch_count }}</td>
+                    <td>{{ row.archived_count }}</td>
+                    <td>{{ row.undecided_count }}</td>
+                </tr>
+                {% empty %}<tr><td colspan="8">No template family usage yet.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Recent reports created from templates</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Report</th><th>Template</th><th>Decision</th><th>Snapshots</th><th>Updated</th></tr></thead>
+            <tbody>
+                {% for report in recent_reports %}
+                <tr>
+                    <td><a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-detail' report.pk %}">{{ report.title }}</a></td>
+                    <td>{% if report.source_template %}<a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-detail' report.source_template.slug %}">{{ report.source_template.title }}</a>{% else %}<span class="muted">Manual</span>{% endif %}</td>
+                    <td><span class="badge badge-{{ report.decision_status_css }}">{{ report.get_decision_status_display }}</span></td>
+                    <td>{{ report.snapshot_count }}</td>
+                    <td>{{ report.updated_at|date:"M j, Y" }}</td>
+                </tr>
+                {% empty %}<tr><td colspan="5">No generated reports yet.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

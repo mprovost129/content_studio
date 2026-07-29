@@ -668,3 +668,60 @@ Next recommended phase:
 Next recommended phase:
 
 - Add saved snapshot comparison reports so useful multi-snapshot comparisons can be named, revisited, shared with notes, and exported later.
+
+## Phase 49 Complete — Report Cloning
+
+- Added clone controls for saved decision-rule snapshot comparison reports.
+- Copied snapshots, preset keys, description, and notes into cloned reports.
+- Reset decision status, decision summary, decision notes, decision owner, and recorded-decision metadata on clones.
+- Added source-report tracking with a `cloned_from` relationship.
+- Added clone page, list/detail links, admin visibility, migration, and tests.
+
+
+## Phase 50: Report templates
+
+Completed:
+- Added reusable decision-rule snapshot comparison report templates.
+- Added built-in starter templates for Monthly Growth Review, Lead Magnet Review, Instagram Experiment Review, and Learning Conversion Review.
+- Added Studio template library, detail, create, edit, delete, and create-report-from-template workflows.
+- Added template defaults for report title, description, notes, presets, focus areas, recommended snapshot count, and recommended snapshot window.
+- Added navigation/help links and admin support.
+
+Recommended next phase:
+- Add report-template usage analytics so you can see which templates are creating the most saved reports and which template families lead to Keep, Roll back, Watch, or Archived decisions.
+
+## Phase 51 Complete — Report-template usage analytics
+
+- [x] Added source-template tracking to saved decision-rule snapshot comparison reports.
+- [x] Added migration `0036_report_template_usage_tracking.py`.
+- [x] Reports created from a template now retain a `source_template` relationship.
+- [x] Cloned reports preserve the source-template attribution while still resetting decision fields.
+- [x] Added Template Usage Analytics page for generated report counts and decision outcomes.
+- [x] Added usage summaries by individual template and by template family.
+- [x] Added filters for template type, active/inactive status, and report decision status.
+- [x] Added CSV export for template usage analytics.
+- [x] Added navigation, dashboard, detail/list links, admin support, and test coverage.
+
+Next recommended phase:
+- Add report-template conversion recommendations, so Studio can suggest which templates to use next based on recent experiments, underused report types, and prior Keep/Roll back/Watch decisions.
+
+## Phase 52 Complete – Report Template Recommendations
+- Added a recommendation page for saved decision-rule comparison report templates.
+- Ranked templates using recent experiment snapshots, recommended snapshot windows, underused template families, prior Keep / Roll back / Watch outcomes, focus areas, and preset defaults.
+- Added CSV export for recommended templates and reasoning.
+- Added navigation links from the dashboard, base nav, help guide, template detail, and template usage pages.
+
+## Recommended Phase 53
+Add saved report-template recommendation feedback so suggestions can be marked useful, dismissed, or revisited later, then use that feedback to tune future recommendations.
+
+
+## Completed — Phase 53
+
+- [x] Add report-template recommendation feedback actions.
+- [x] Track shown/ignored, useful, dismissed, and revisit-later signals.
+- [x] Use feedback in future template recommendation ranking.
+- [x] Add feedback history, CSV export, admin support, and documentation.
+
+## Recommended Next Phase — Phase 54
+
+- Add report-template recommendation tuning controls so template recommendation weights and feedback penalties can be adjusted without editing code.

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Template recommendation feedback{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">REPORT TEMPLATES</span>
+        <h1>Recommendation feedback</h1>
+        <p>Review which template recommendations were useful, dismissed, marked for later, or repeatedly ignored. This feedback now adjusts future template rankings.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-primary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback-export' %}?status={{ status }}&template_type={{ template_type }}&q={{ q }}">Export CSV</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations' %}">Recommendations</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}">Template usage</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-card"><span>Feedback records</span><strong>{{ total_feedback }}</strong></div>
+    <div class="stat-card"><span>Useful</span><strong>{{ useful_count }}</strong></div>
+    <div class="stat-card"><span>Dismissed</span><strong>{{ dismissed_count }}</strong></div>
+    <div class="stat-card"><span>Revisit later</span><strong>{{ revisit_count }}</strong></div>
+    <div class="stat-card"><span>Ignored signals</span><strong>{{ ignored_count }}</strong></div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Filters</h2></div>
+    <form method="get" class="filter-grid">
+        <label>Status
+            <select name="status">
+                <option value="">All statuses</option>
+                {% for value,label in status_choices %}<option value="{{ value }}" {% if status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>Template type
+            <select name="template_type">
+                <option value="">All types</option>
+                {% for value,label in template_type_choices %}<option value="{{ value }}" {% if template_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>Search
+            <input type="search" name="q" value="{{ q }}" placeholder="Template, key, notes">
+        </label>
+        <button class="btn btn-primary" type="submit">Apply</button>
+    </form>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Feedback history</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Template</th><th>Status</th><th>Score</th><th>Times shown</th><th>Last seen</th><th>Responded</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+                {% for item in feedback %}
+                <tr>
+                    <td><strong><a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-detail' item.template.slug %}">{{ item.template.title }}</a></strong><br><small>{{ item.template.get_template_type_display }} · {{ item.recommendation_key }}</small></td>
+                    <td><span class="badge badge-{% if item.status == 'useful' %}keep{% elif item.status == 'dismissed' %}rollback{% elif item.status == 'revisit' %}inconclusive{% else %}neutral{% endif %}">{{ item.get_status_display }}</span>{% if item.is_ignored_signal %}<br><small class="muted">ignored signal</small>{% endif %}</td>
+                    <td>{{ item.score }}<br><small>{{ item.priority }}</small></td>
+                    <td>{{ item.times_shown }}</td>
+                    <td>{{ item.last_seen_at|date:"M j, Y g:i A" }}</td>
+                    <td>{% if item.responded_at %}{{ item.responded_at|date:"M j, Y g:i A" }}{% else %}<span class="muted">No response</span>{% endif %}</td>
+                    <td>{{ item.notes|default:"—" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7">No feedback records match those filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

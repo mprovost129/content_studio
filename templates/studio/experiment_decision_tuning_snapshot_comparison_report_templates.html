@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Report templates{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">RECOMMENDATIONS</span>
+        <h1>Saved report templates</h1>
+        <p>Create reusable comparison structures for monthly growth reviews, lead magnet reviews, Instagram experiments, and learning conversion reviews.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-primary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-create' %}">New template</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}">Usage analytics</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-reports' %}">Saved reports</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-card"><span>Templates</span><strong>{{ template_count }}</strong></div>
+    <div class="stat-card"><span>Type</span><strong>{{ template_type|default:"All"|title }}</strong></div>
+</section>
+
+<section class="panel mt-4">
+    <form method="get" class="filter-bar">
+        <label>Search
+            <input type="search" name="q" value="{{ query }}" placeholder="Lead magnet, monthly, Instagram...">
+        </label>
+        <label>Type
+            <select name="template_type">
+                <option value="">All types</option>
+                {% for value,label in template_type_choices %}
+                <option value="{{ value }}" {% if value == template_type %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Status
+            <select name="active">
+                <option value="">All</option>
+                <option value="yes" {% if active == "yes" %}selected{% endif %}>Active</option>
+                <option value="no" {% if active == "no" %}selected{% endif %}>Inactive</option>
+            </select>
+        </label>
+        <button class="btn btn-primary" type="submit">Filter</button>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-templates' %}">Reset</a>
+    </form>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Templates</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Template</th><th>Type</th><th>Snapshots</th><th>Presets</th><th>Focus areas</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody>
+                {% for template in templates %}
+                <tr>
+                    <td><strong>{{ template.title }}</strong><br><small>{{ template.description|default:"No description"|truncatechars:120 }}</small></td>
+                    <td>{{ template.get_template_type_display }}</td>
+                    <td>{{ template.recommended_snapshot_count }} recent · {{ template.recommended_window_days }}d</td>
+                    <td>{{ template.preset_count }}</td>
+                    <td>{{ template.focus_area_count }}</td>
+                    <td>{% if template.is_active %}<span class="badge badge-keep">Active</span>{% else %}<span class="badge badge-neutral">Inactive</span>{% endif %}</td>
+                    <td>
+                        <a class="btn btn-primary btn-sm" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-from-template' template.slug %}">Use</a>
+                        <a class="btn btn-secondary btn-sm" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-detail' template.slug %}">Open</a>
+                        <a class="btn btn-secondary btn-sm" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-update' template.slug %}">Edit</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7">No report templates yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

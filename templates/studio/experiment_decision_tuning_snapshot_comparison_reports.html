@@ -9,6 +9,8 @@
     </div>
     <div class="heading-actions">
         <a class="btn btn-primary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-create' %}">New saved report</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-templates' %}">Report templates</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}">Template usage</a>
         <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-experiment-snapshot-compare' %}">Compare snapshots</a>
         <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-experiment-snapshots' %}">All snapshots</a>
     </div>
@@ -42,23 +44,25 @@
     <div class="table-wrap">
         <table>
             <thead>
-                <tr><th>Report</th><th>Decision</th><th>Snapshots</th><th>Presets</th><th>Updated</th><th></th></tr>
+                <tr><th>Report</th><th>Source template</th><th>Decision</th><th>Snapshots</th><th>Presets</th><th>Updated</th><th></th></tr>
             </thead>
             <tbody>
                 {% for report in reports %}
                 <tr>
                     <td><strong>{{ report.title }}</strong><br><small>{{ report.description|default:"No description"|truncatechars:120 }}</small></td>
+                    <td>{% if report.source_template %}<a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-detail' report.source_template.slug %}">{{ report.source_template.title }}</a>{% else %}<span class="muted">Manual</span>{% endif %}</td>
                     <td><span class="badge badge-{{ report.decision_status_css }}">{{ report.get_decision_status_display }}</span><br><small>{{ report.decision_summary|default:"No decision summary"|truncatechars:90 }}</small></td>
                     <td>{{ report.snapshot_count }}</td>
                     <td>{{ report.preset_count }}</td>
                     <td>{{ report.updated_at|date:"M j, Y g:i A" }}</td>
                     <td>
                         <a class="btn btn-secondary btn-sm" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-detail' report.pk %}">Open</a>
+                        <a class="btn btn-secondary btn-sm" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-clone' report.pk %}">Clone</a>
                         <a class="btn btn-secondary btn-sm" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-update' report.pk %}">Edit</a>
                     </td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="6">No saved comparison reports yet.</td></tr>
+                <tr><td colspan="7">No saved comparison reports yet.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

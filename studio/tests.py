@@ -21,6 +21,8 @@ from .models import (
     ExperimentDecisionTuningChangeLog,
     ExperimentDecisionTuningExperimentSnapshot,
     ExperimentDecisionTuningSnapshotComparisonReport,
+    ExperimentDecisionTuningSnapshotComparisonReportTemplate,
+    ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback,
     GraphicAsset,
     GraphicTemplate,
     LearningResource,
@@ -48,6 +50,7 @@ from .models import (
 from .services.graphics import _python_logo, generate_graphics
 from .services.openai import generate_caption
 from .services.resource_pdfs import resource_pdf_filename
+from .services.report_template_recommendations import build_report_template_recommendations
 from .services.resource_recommendations import build_resource_cta_recommendations
 from .services.social_carousels import (
     apply_social_carousel_template_to_lesson,
@@ -2412,3 +2415,200 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
         self.assertContains(export, "Chart data - decision counts")
         self.assertContains(export, "Chart data - top metric deltas")
 
+        clone_get = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-clone", args=[report.pk]))
+        self.assertContains(clone_get, "Clone saved report")
+        self.assertContains(clone_get, "Decision fields are reset")
+
+        clone_response = self.client.post(
+            reverse("studio:experiment-decision-tuning-snapshot-comparison-report-clone", args=[report.pk]),
+            {
+                "title": "September lead magnet snapshot review",
+                "description": "Reuse the same comparison structure for September.",
+                "notes": "Fresh report for the next content cycle.",
+            },
+        )
+        cloned = ExperimentDecisionTuningSnapshotComparisonReport.objects.get(title="September lead magnet snapshot review")
+        self.assertRedirects(clone_response, reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", args=[cloned.pk]))
+        self.assertEqual(cloned.cloned_from, report)
+        self.assertEqual(cloned.snapshots.count(), report.snapshots.count())
+        self.assertEqual(cloned.preset_keys, report.preset_keys)
+        self.assertEqual(cloned.decision_status, ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED)
+        self.assertEqual(cloned.decision_summary, "")
+        self.assertEqual(cloned.decision_notes, "")
+        self.assertIsNone(cloned.decision_owner)
+        self.assertIsNone(cloned.decision_recorded_by)
+        self.assertIsNone(cloned.decision_recorded_at)
+
+
+
+    def test_report_template_usage_tracks_created_reports_and_exports_csv(self):
+        tuning = ExperimentDecisionTuning.get_active()
+        log = ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED,
+            changed_by=self.staff,
+            preset_key="lead_magnet_focus",
+            preset_name="Lead Magnet Focus",
+            experiment_label="Lead magnet decision test",
+        )
+        now = timezone.now()
+        snapshot = ExperimentDecisionTuningExperimentSnapshot.objects.create(
+            change_log=log,
+            window_days=14,
+            before_start=now - timedelta(days=28),
+            before_end=now - timedelta(days=14),
+            after_start=now - timedelta(days=14),
+            after_end=now,
+            summary={"primary_resource_delta": {"change": 4}},
+            generated_by=self.staff,
+        )
+        template = ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.create(
+            title="Lead Magnet Review",
+            slug="lead-magnet-review-test",
+            template_type=ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.LEAD_MAGNET,
+            default_report_title="Lead Magnet Review",
+            default_preset_keys=["lead_magnet_focus"],
+            recommended_snapshot_count=1,
+            recommended_window_days=14,
+            is_active=True,
+        )
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning-snapshot-comparison-report-from-template", args=[template.slug]),
+            {
+                "title": "July lead magnet review",
+                "description": "Template-created report.",
+                "snapshots": [snapshot.pk],
+                "preset_keys": ["lead_magnet_focus"],
+                "notes": "Created from the saved template.",
+            },
+        )
+        report = ExperimentDecisionTuningSnapshotComparisonReport.objects.get(title="July lead magnet review")
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", args=[report.pk]))
+        self.assertEqual(report.source_template, template)
+
+        report.decision_status = ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.KEEP
+        report.decision_summary = "Keep this template structure for the next lead magnet review."
+        report.save(update_fields=["decision_status", "decision_summary", "updated_at"])
+
+        usage = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-usage"))
+        self.assertContains(usage, "Template usage analytics")
+        self.assertContains(usage, "Lead Magnet Review")
+        self.assertContains(usage, "July lead magnet review")
+        self.assertContains(usage, "Keep / Roll back / Watch")
+
+        export = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-usage-export"))
+        self.assertContains(export, "template_title")
+        self.assertContains(export, "Lead Magnet Review")
+        self.assertContains(export, "July lead magnet review")
+
+
+    def test_report_template_recommendation_feedback_actions_and_history(self):
+        self.client.force_login(self.user)
+        template = ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.create(
+            title="Feedback Template",
+            slug="feedback-template",
+            template_type=ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.MONTHLY_GROWTH,
+            recommended_snapshot_count=1,
+            recommended_window_days=14,
+            is_active=True,
+        )
+        recommendation_key = f"report-template:{template.pk}:type:{template.template_type}:window:{template.recommended_window_days}:snapshots:{template.recommended_snapshot_count}"
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback-action"),
+            {
+                "template_id": template.pk,
+                "recommendation_key": recommendation_key,
+                "status": "useful",
+                "score": "72",
+                "priority": "Medium",
+                "suggested_snapshot_ids": "1,2",
+                "reasons": "Good match||Worth testing",
+            },
+        )
+        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations"))
+        feedback = ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.objects.get(template=template)
+        self.assertEqual(feedback.status, feedback.Status.USEFUL)
+        self.assertEqual(feedback.score, 72)
+
+        history = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback"))
+        self.assertContains(history, "Recommendation feedback")
+        self.assertContains(history, "Feedback Template")
+        self.assertContains(history, "Useful")
+
+        export = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback-export"))
+        self.assertContains(export, "template_title")
+        self.assertContains(export, "Feedback Template")
+
+    def test_report_template_recommendation_feedback_changes_ranking(self):
+        template = ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.create(
+            title="Dismissed Template",
+            slug="dismissed-template",
+            template_type=ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.MONTHLY_GROWTH,
+            recommended_snapshot_count=1,
+            recommended_window_days=14,
+            is_active=True,
+        )
+        recommendation_key = f"report-template:{template.pk}:type:{template.template_type}:window:{template.recommended_window_days}:snapshots:{template.recommended_snapshot_count}"
+        before = next(item for item in build_report_template_recommendations(self.user, limit=20) if item.template == template)
+        ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.objects.create(
+            template=template,
+            recommendation_key=recommendation_key,
+            status=ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.Status.DISMISSED,
+            score=before.score,
+            priority=before.priority,
+            created_by=self.user,
+        )
+        after = next(item for item in build_report_template_recommendations(self.user, limit=20) if item.template == template)
+        self.assertLess(after.score, before.score)
+        self.assertLess(after.score_parts.get("feedback", 0), 0)
+
+    def test_report_template_recommendations_rank_and_export_templates(self):
+        self.client.force_login(self.user)
+        tuning = ExperimentDecisionTuning.get_active()
+        log = ExperimentDecisionTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED,
+            changed_by=self.user,
+            preset_key="lead_magnet_focus",
+            preset_name="Lead Magnet Focus",
+            experiment_label="Lead magnet test",
+        )
+        now = timezone.now()
+        ExperimentDecisionTuningExperimentSnapshot.objects.create(
+            change_log=log,
+            window_days=14,
+            before_start=now - timedelta(days=28),
+            before_end=now - timedelta(days=14),
+            after_start=now - timedelta(days=14),
+            after_end=now,
+            summary={"primary_resource_delta": {"change": 5}, "primary_cta_delta": {"change": 3}},
+            generated_by=self.user,
+        )
+        template = ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.create(
+            title="Lead Magnet Recommendation Test",
+            slug="lead-magnet-recommendation-test",
+            template_type=ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.LEAD_MAGNET,
+            default_report_title="Lead Magnet Recommendation Test",
+            default_preset_keys=["lead_magnet_focus"],
+            recommended_snapshot_count=1,
+            recommended_window_days=14,
+            focus_areas=["PDF downloads", "newsletter signups"],
+            is_active=True,
+        )
+        report = ExperimentDecisionTuningSnapshotComparisonReport.objects.create(
+            title="Prior keep report",
+            source_template=template,
+            decision_status=ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.KEEP,
+            created_by=self.user,
+        )
+        response = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations"))
+        self.assertContains(response, "Template recommendations")
+        self.assertContains(response, "Lead Magnet Recommendation Test")
+        self.assertContains(response, "Recent snapshots show lead-magnet activity")
+        self.assertContains(response, "Prior reports from this template produced 1 Keep decision")
+        self.assertContains(response, "Create report")
+
+        export = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations-export"))
+        self.assertContains(export, "template_title")
+        self.assertContains(export, "Lead Magnet Recommendation Test")
+        self.assertContains(export, "lead-magnet activity")

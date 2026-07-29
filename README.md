@@ -1156,3 +1156,88 @@ The comparison view includes:
 - CSV export for summary comparisons, decision recommendations, and metric deltas.
 
 This makes it easier to compare multiple experiments or different time windows before deciding whether a decision-rule preset should be kept, rolled back, or marked inconclusive.
+
+## Phase 49: Report cloning
+
+Saved decision-rule snapshot comparison reports can now be cloned from the report detail or list pages. Cloning copies the selected snapshots, preset keys, description, and notes, links the new report back to the source report, and resets all decision fields so the copy can be reused for a new month, campaign, or experiment family without carrying forward the prior decision record.
+
+
+## Phase 50: Report templates
+
+This phase adds reusable report templates for saved decision-rule snapshot comparison reports.
+
+New private Studio routes:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/new/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/<slug>/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/<slug>/edit/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/<slug>/delete/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/<slug>/create-report/`
+
+Built-in templates are created the first time the report-template library is opened:
+
+- Monthly Growth Review
+- Lead Magnet Review
+- Instagram Experiment Review
+- Learning Conversion Review
+
+Templates store reusable report defaults, including title seed, description, notes, decision-rule presets, focus areas, recommended snapshot count, and recommended experiment window. Creating a report from a template still produces a normal saved comparison report that can be edited, exported, printed, cloned, and given a report-level decision status.
+
+New migration:
+
+- `0035_decision_rule_comparison_report_templates.py`
+
+## Phase 51: Report-template usage analytics
+
+Phase 51 adds analytics for saved decision-rule snapshot comparison report templates. Reports created from a template now keep a `source_template` relationship, which makes it possible to measure which template structures are actually being used and which template families produce meaningful decisions.
+
+New private Studio routes:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/usage/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/usage/export/`
+
+The usage analytics page includes:
+
+- total templates and active templates
+- generated report count
+- Keep, Roll back, Watch, Archived, and Undecided decision counts
+- average snapshots and presets per template-created report
+- usage grouped by template family
+- recent reports created from templates
+- filters for template type, active status, and decision status
+- CSV export for external review in Excel or Google Sheets
+
+Reports created through `/report-templates/<slug>/create-report/` now automatically store their source template. Cloned reports preserve the original source-template attribution while still resetting report-level decision fields.
+
+New migration:
+
+- `0036_report_template_usage_tracking.py`
+
+### Phase 52: Report Template Recommendations
+
+Phase 52 adds a private Studio recommendation screen for deciding which saved decision-rule comparison report template to use next.
+
+New routes:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/export/`
+
+The recommendation engine scores active report templates using:
+
+- recent decision-rule experiment snapshots
+- the template's recommended comparison window
+- underused template families
+- previous Keep, Roll back, Watch, Archived, or Undecided outcomes
+- template focus areas
+- default decision-rule presets
+
+The CSV export includes the recommendation rank, priority, score breakdown, suggested snapshot IDs, suggested snapshot labels, and ranking reasons.
+
+
+## Phase 53 — Report-template recommendation feedback
+
+- Added staff feedback for report-template recommendations: Useful, Dismissed, and Revisit later.
+- Recommendation views now record shown/ignored signals and use that feedback to adjust future ranking.
+- Added feedback history and CSV export for reviewing recommendation quality.
+- Added admin visibility, navigation links, migration, and tests/docs for the feedback loop.

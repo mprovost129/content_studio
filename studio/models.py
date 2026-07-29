@@ -2089,12 +2089,29 @@ class ExperimentDecisionTuningSnapshotComparisonReport(TimestampedModel):
         blank=True,
         related_name="decision_rule_snapshot_comparison_reports_updated",
     )
+    cloned_from = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="clones",
+        help_text="Original saved comparison report this report was cloned from, when applicable.",
+    )
+    source_template = models.ForeignKey(
+        "ExperimentDecisionTuningSnapshotComparisonReportTemplate",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="generated_reports",
+        help_text="Report template used to create this saved comparison report, when applicable.",
+    )
 
     class Meta:
         ordering = ("-updated_at", "-pk")
         indexes = [
             models.Index(fields=("title", "updated_at")),
             models.Index(fields=("decision_status", "updated_at")),
+            models.Index(fields=("source_template", "updated_at")),
         ]
         verbose_name = "decision-rule snapshot comparison report"
         verbose_name_plural = "decision-rule snapshot comparison reports"
@@ -2122,6 +2139,162 @@ class ExperimentDecisionTuningSnapshotComparisonReport(TimestampedModel):
     @property
     def has_recorded_decision(self):
         return self.decision_status != self.DecisionStatus.UNDECIDED
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplate(TimestampedModel):
+    """Reusable saved-report structure for recurring decision-rule comparison reviews."""
+
+    class TemplateType(models.TextChoices):
+        MONTHLY_GROWTH = "monthly_growth", "Monthly Growth Review"
+        LEAD_MAGNET = "lead_magnet", "Lead Magnet Review"
+        INSTAGRAM_EXPERIMENT = "instagram_experiment", "Instagram Experiment Review"
+        LEARNING_CONVERSION = "learning_conversion", "Learning Conversion Review"
+        CUSTOM = "custom", "Custom"
+
+    title = models.CharField(max_length=180, db_index=True)
+    slug = models.SlugField(max_length=200, unique=True)
+    template_type = models.CharField(
+        max_length=40,
+        choices=TemplateType.choices,
+        default=TemplateType.CUSTOM,
+        db_index=True,
+    )
+    description = models.TextField(blank=True)
+    default_report_title = models.CharField(
+        max_length=180,
+        blank=True,
+        help_text="Optional title seed used when creating a report from this template.",
+    )
+    default_description = models.TextField(blank=True)
+    default_notes = models.TextField(
+        blank=True,
+        help_text="Default analysis prompts, checklist items, or review notes copied into new reports.",
+    )
+    default_preset_keys = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Decision-rule preset keys included by default when a report is created from this template.",
+    )
+    recommended_snapshot_count = models.PositiveSmallIntegerField(
+        default=3,
+        help_text="Suggested number of recent snapshots to preselect when creating a report.",
+    )
+    recommended_window_days = models.PositiveSmallIntegerField(
+        default=14,
+        help_text="Recommended experiment snapshot window for this review type.",
+    )
+    focus_areas = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Human-readable focus areas such as follower growth, PDF downloads, or learner conversions.",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="decision_rule_snapshot_comparison_report_templates_created",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="decision_rule_snapshot_comparison_report_templates_updated",
+    )
+
+    class Meta:
+        ordering = ("template_type", "title")
+        indexes = [
+            models.Index(fields=("template_type", "is_active")),
+            models.Index(fields=("slug",)),
+        ]
+        verbose_name = "decision-rule comparison report template"
+        verbose_name_plural = "decision-rule comparison report templates"
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def focus_area_count(self):
+        return len(self.focus_areas or [])
+
+    @property
+    def preset_count(self):
+        return len(self.default_preset_keys or [])
+
+    def build_report_initial(self):
+        return {
+            "title": self.default_report_title or self.title,
+            "description": self.default_description or self.description,
+            "notes": self.default_notes,
+            "preset_keys": list(self.default_preset_keys or []),
+        }
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback(TimestampedModel):
+    """Staff feedback on saved report-template recommendations.
+
+    This creates a lightweight feedback loop so Studio can learn whether a
+    template recommendation was useful, dismissed, or worth revisiting later.
+    """
+
+    class Status(models.TextChoices):
+        SHOWN = "shown", "Shown / ignored"
+        USEFUL = "useful", "Useful"
+        DISMISSED = "dismissed", "Dismissed"
+        REVISIT = "revisit", "Revisit later"
+
+    template = models.ForeignKey(
+        ExperimentDecisionTuningSnapshotComparisonReportTemplate,
+        on_delete=models.CASCADE,
+        related_name="recommendation_feedback",
+    )
+    recommendation_key = models.CharField(max_length=180, db_index=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.SHOWN, db_index=True)
+    score = models.IntegerField(default=0)
+    priority = models.CharField(max_length=20, blank=True)
+    reasons = models.JSONField(default=list, blank=True)
+    suggested_snapshot_ids = models.JSONField(default=list, blank=True)
+    times_shown = models.PositiveIntegerField(default=1)
+    first_seen_at = models.DateTimeField(default=timezone.now)
+    last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
+    responded_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="report_template_recommendation_feedback_created",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="report_template_recommendation_feedback_updated",
+    )
+
+    class Meta:
+        ordering = ("-last_seen_at", "template__title")
+        unique_together = (("template", "recommendation_key", "created_by"),)
+        indexes = [
+            models.Index(fields=("status", "last_seen_at")),
+            models.Index(fields=("template", "status")),
+            models.Index(fields=("recommendation_key", "status")),
+        ]
+        verbose_name = "report-template recommendation feedback"
+        verbose_name_plural = "report-template recommendation feedback"
+
+    def __str__(self):
+        return f"{self.template} · {self.get_status_display()}"
+
+    @property
+    def is_ignored_signal(self):
+        return self.status == self.Status.SHOWN and self.times_shown >= 3
+
 
 
 class ResourceCTARecommendationFeedback(TimestampedModel):

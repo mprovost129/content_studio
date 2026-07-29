@@ -29,6 +29,7 @@
     <div class="heading-actions">
         <a class="btn btn-primary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-print' report.pk %}">Printable report</a>
         <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-export' report.pk %}">Export CSV</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-clone' report.pk %}">Clone</a>
         <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-update' report.pk %}">Edit</a>
         <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-reports' %}">Saved reports</a>
     </div>
@@ -38,8 +39,21 @@
     <div class="stat-card"><span>Snapshots</span><strong>{{ report.snapshot_count }}</strong></div>
     <div class="stat-card"><span>Preset profiles</span><strong>{{ report.preset_count }}</strong></div>
     <div class="stat-card"><span>Decision</span><strong>{{ report.get_decision_status_display }}</strong></div>
+    <div class="stat-card"><span>Source</span><strong>{% if report.source_template %}Template{% else %}Manual{% endif %}</strong></div>
     <div class="stat-card"><span>Updated</span><strong>{{ report.updated_at|date:"M j" }}</strong></div>
 </section>
+
+{% if report.source_template %}
+<section class="panel mt-4">
+    <p class="muted">Created from <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-detail' report.source_template.slug %}">{{ report.source_template.title }}</a>. <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}?template_type={{ report.source_template.template_type }}">View template usage analytics</a>.</p>
+</section>
+{% endif %}
+
+{% if report.cloned_from %}
+<section class="panel mt-4">
+    <p class="muted">Cloned from <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-detail' report.cloned_from.pk %}">{{ report.cloned_from.title }}</a>. Decision fields were reset when this report was created.</p>
+</section>
+{% endif %}
 
 <section class="panel mt-4">
     <div class="panel-heading">

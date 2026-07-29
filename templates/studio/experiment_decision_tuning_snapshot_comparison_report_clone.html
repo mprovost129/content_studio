@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Clone {{ source_report.title }}{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">SAVED COMPARISON</span>
+        <h1>Clone saved report</h1>
+        <p>Create a reusable copy of this comparison for a new month, campaign, or experiment family.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-detail' source_report.pk %}">Back to source</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-card"><span>Source report</span><strong>{{ source_report.title|truncatechars:36 }}</strong></div>
+    <div class="stat-card"><span>Snapshots copied</span><strong>{{ source_report.snapshot_count }}</strong></div>
+    <div class="stat-card"><span>Presets copied</span><strong>{{ source_preset_count }}</strong></div>
+    <div class="stat-card"><span>Decision</span><strong>Reset</strong></div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading">
+        <h2>New cloned report</h2>
+        <p class="muted">Snapshots, presets, description, and notes are reused. Decision status, decision summary, decision notes, owner, and recorded-by fields are intentionally reset.</p>
+    </div>
+    <form method="post" class="stacked-form">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <div class="form-actions">
+            <button class="btn btn-primary" type="submit">Create cloned report</button>
+            <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-detail' source_report.pk %}">Cancel</a>
+        </div>
+    </form>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Snapshots that will be copied</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Snapshot</th><th>Window</th><th>Generated</th></tr></thead>
+            <tbody>
+                {% for snapshot in source_snapshots %}
+                <tr>
+                    <td>{{ snapshot.experiment_label }}</td>
+                    <td>{{ snapshot.window_days }} days</td>
+                    <td>{{ snapshot.generated_at|date:"M j, Y g:i A" }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="3">No snapshots will be copied.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

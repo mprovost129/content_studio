@@ -27,6 +27,8 @@ from .models import (
     ExperimentDecisionTuningChangeLog,
     ExperimentDecisionTuningExperimentSnapshot,
     ExperimentDecisionTuningSnapshotComparisonReport,
+    ExperimentDecisionTuningSnapshotComparisonReportTemplate,
+    ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback,
     RecommendationTuningChangeLog,
     RecommendationTuningExperimentSnapshot,
     ResourcePerformanceEvent,
@@ -261,18 +263,44 @@ class ExperimentDecisionTuningExperimentSnapshotAdmin(admin.ModelAdmin):
 
 @admin.register(ExperimentDecisionTuningSnapshotComparisonReport)
 class ExperimentDecisionTuningSnapshotComparisonReportAdmin(admin.ModelAdmin):
-    list_display = ("title", "decision_status", "snapshot_count", "preset_count", "updated_at", "created_by")
-    list_filter = ("decision_status", "decision_recorded_at", "updated_at")
-    search_fields = ("title", "description", "notes", "decision_summary", "decision_notes", "created_by__email", "updated_by__email", "decision_owner__email")
+    list_display = ("title", "decision_status", "source_template", "snapshot_count", "preset_count", "cloned_from", "updated_at", "created_by")
+    list_filter = ("decision_status", "source_template", "decision_recorded_at", "updated_at")
+    search_fields = ("title", "description", "notes", "decision_summary", "decision_notes", "source_template__title", "cloned_from__title", "created_by__email", "updated_by__email", "decision_owner__email")
     readonly_fields = ("created_at", "updated_at", "snapshot_count", "preset_count", "decision_recorded_at", "decision_recorded_by")
     filter_horizontal = ("snapshots",)
     fieldsets = (
         ("Report", {"fields": ("title", "description", "snapshots", "preset_keys", "notes")}),
         ("Decision", {"fields": ("decision_status", "decision_summary", "decision_notes", "decision_owner", "decision_recorded_by", "decision_recorded_at")}),
-        ("Ownership", {"fields": ("created_by", "updated_by")}),
+        ("Ownership", {"fields": ("created_by", "updated_by", "source_template", "cloned_from")}),
         ("Metadata", {"fields": ("snapshot_count", "preset_count", "created_at", "updated_at")}),
     )
 
+
+@admin.register(ExperimentDecisionTuningSnapshotComparisonReportTemplate)
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateAdmin(admin.ModelAdmin):
+    list_display = ("title", "template_type", "is_active", "generated_report_count", "recommended_snapshot_count", "recommended_window_days", "preset_count", "focus_area_count", "updated_at")
+    list_filter = ("template_type", "is_active", "recommended_window_days", "updated_at")
+    search_fields = ("title", "slug", "description", "default_report_title", "default_notes")
+    prepopulated_fields = {"slug": ("title",)}
+    readonly_fields = ("created_at", "updated_at", "preset_count", "focus_area_count", "generated_report_count")
+    fieldsets = (
+        ("Template", {"fields": ("title", "slug", "template_type", "description", "is_active")}),
+        ("Report defaults", {"fields": ("default_report_title", "default_description", "default_notes", "default_preset_keys")}),
+        ("Snapshot guidance", {"fields": ("recommended_snapshot_count", "recommended_window_days", "focus_areas")}),
+        ("Ownership", {"fields": ("created_by", "updated_by")}),
+        ("Metadata", {"fields": ("preset_count", "focus_area_count", "generated_report_count", "created_at", "updated_at")}),
+    )
+
+    def generated_report_count(self, obj):
+        return obj.generated_reports.count()
+
+
+@admin.register(ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback)
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedbackAdmin(admin.ModelAdmin):
+    list_display = ("template", "status", "times_shown", "score", "priority", "last_seen_at", "responded_at", "created_by")
+    list_filter = ("status", "template__template_type", "priority", "last_seen_at", "responded_at")
+    search_fields = ("template__title", "recommendation_key", "notes", "created_by__email", "updated_by__email")
+    readonly_fields = ("first_seen_at", "last_seen_at", "responded_at", "created_at", "updated_at")
 
 @admin.register(ResourceCTARecommendationFeedback)
 class ResourceCTARecommendationFeedbackAdmin(admin.ModelAdmin):

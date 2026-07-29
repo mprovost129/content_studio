@@ -25,6 +25,7 @@ from .models import (
     RecommendationTuningExperimentSnapshot,
     ExperimentDecisionTuningExperimentSnapshot,
     ExperimentDecisionTuningSnapshotComparisonReport,
+    ExperimentDecisionTuningSnapshotComparisonReportTemplate,
     LessonBlock,
     NewsletterSubscriber,
     NewsletterCampaign,
@@ -359,6 +360,109 @@ class ExperimentDecisionTuningSnapshotComparisonReportForm(StyledModelForm):
         return self.cleaned_data.get("decision_status") or ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED
 
 
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateForm(StyledModelForm):
+    default_preset_keys = forms.MultipleChoiceField(
+        choices=DECISION_PRESET_CHOICES,
+        required=False,
+        label="Default decision-rule presets",
+        help_text="Preset profiles that should be included when creating reports from this template.",
+        widget=forms.CheckboxSelectMultiple,
+    )
+    focus_areas_text = forms.CharField(
+        required=False,
+        label="Focus areas",
+        help_text="One focus area per line, such as follower growth, PDF downloads, or learner conversions.",
+        widget=forms.Textarea(attrs={"rows": 5}),
+    )
+
+    class Meta:
+        model = ExperimentDecisionTuningSnapshotComparisonReportTemplate
+        fields = (
+            "title",
+            "slug",
+            "template_type",
+            "description",
+            "default_report_title",
+            "default_description",
+            "default_notes",
+            "default_preset_keys",
+            "recommended_snapshot_count",
+            "recommended_window_days",
+            "focus_areas_text",
+            "is_active",
+        )
+        widgets = {
+            "description": forms.Textarea(attrs={"rows": 3}),
+            "default_description": forms.Textarea(attrs={"rows": 3}),
+            "default_notes": forms.Textarea(attrs={"rows": 6}),
+        }
+        help_texts = {
+            "default_report_title": "Optional reusable title seed. You can still override it when creating an actual report.",
+            "recommended_snapshot_count": "Used to preselect recent snapshots when creating a report from this template.",
+            "recommended_window_days": "Guidance only; snapshots are still selected manually from existing saved snapshots.",
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            self.fields["focus_areas_text"].initial = "\n".join(self.instance.focus_areas or [])
+
+    def clean_focus_areas_text(self):
+        raw = self.cleaned_data.get("focus_areas_text", "")
+        return [line.strip() for line in raw.splitlines() if line.strip()]
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.focus_areas = self.cleaned_data.get("focus_areas_text", [])
+        instance.default_preset_keys = list(self.cleaned_data.get("default_preset_keys") or [])
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportFromTemplateForm(ExperimentDecisionTuningSnapshotComparisonReportForm):
+    class Meta(ExperimentDecisionTuningSnapshotComparisonReportForm.Meta):
+        fields = ExperimentDecisionTuningSnapshotComparisonReportForm.Meta.fields
+
+    def __init__(self, *args, template=None, **kwargs):
+        self.report_template = template
+        super().__init__(*args, **kwargs)
+        if template:
+            self.fields["notes"].help_text = "Template notes were copied in. Edit them for this specific report."
+
+
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportCloneForm(forms.Form):
+    title = forms.CharField(
+        max_length=180,
+        label="New report title",
+        help_text="Use a new title for the cloned report, such as September lead magnet review.",
+    )
+    description = forms.CharField(
+        required=False,
+        label="Description",
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+    notes = forms.CharField(
+        required=False,
+        label="Report notes",
+        help_text="Optional notes for the cloned report. Decision fields are reset automatically.",
+        widget=forms.Textarea(attrs={"rows": 4}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            if isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs.setdefault("class", "form-check-input")
+            elif isinstance(field.widget, forms.Select):
+                field.widget.attrs.setdefault("class", "form-select")
+            else:
+                field.widget.attrs.setdefault("class", "form-control")
 
 class ExperimentDecisionTuningForm(StyledModelForm):
     change_reason = forms.CharField(

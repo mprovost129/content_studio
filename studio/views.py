@@ -11,6 +11,8 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 from django.views.generic import (
     CreateView,
@@ -20,6 +22,7 @@ from django.views.generic import (
     ListView,
     TemplateView,
     UpdateView,
+    View,
 )
 
 from .forms import (
@@ -44,6 +47,9 @@ from .forms import (
     ExperimentDecisionTuningExperimentSnapshotForm,
     ExperimentDecisionTuningExperimentSnapshotComparisonForm,
     ExperimentDecisionTuningSnapshotComparisonReportForm,
+    ExperimentDecisionTuningSnapshotComparisonReportCloneForm,
+    ExperimentDecisionTuningSnapshotComparisonReportTemplateForm,
+    ExperimentDecisionTuningSnapshotComparisonReportFromTemplateForm,
     RecommendationTuningExperimentOutcomeForm,
     RecommendationTuningSimulationForm,
     RecommendationTuningExperimentSnapshotForm,
@@ -85,6 +91,8 @@ from .models import (
     ExperimentDecisionTuningChangeLog,
     ExperimentDecisionTuningExperimentSnapshot,
     ExperimentDecisionTuningSnapshotComparisonReport,
+    ExperimentDecisionTuningSnapshotComparisonReportTemplate,
+    ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback,
     RecommendationTuningChangeLog,
     RecommendationTuningExperimentSnapshot,
     ResourcePerformanceEvent,
@@ -101,6 +109,11 @@ from .services.graphics import GraphicGenerationError, generate_graphics
 from .services.lesson_ideas import LessonIdeaDraft, create_lesson_from_idea
 from .services.resource_ideas import ResourceIdeaDraft, create_resource_from_idea
 from .services.resource_pdfs import render_learning_resource_pdf, resource_pdf_filename
+from .services.report_template_recommendations import (
+    build_report_template_recommendations,
+    record_template_recommendation_response,
+    record_template_recommendation_shown,
+)
 from .services.recommendation_tuning_presets import (
     PRESETS,
     apply_preset_to_active_tuning,
@@ -394,6 +407,12 @@ class DashboardView(StaffRequiredMixin, TemplateView):
             "completions": ResourceLessonConversionEvent.objects.filter(event_type=ResourceLessonConversionEvent.EventType.LESSON_COMPLETE, occurred_at__gte=last_30_days).count(),
         }
         context["recommendation_tuning"] = RecommendationTuning.get_active()
+        context["report_template_totals"] = {
+            "templates": ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.count(),
+            "generated_reports": ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(source_template__isnull=False).count(),
+            "keep": ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(source_template__isnull=False, decision_status=ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.KEEP).count(),
+            "roll_back": ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(source_template__isnull=False, decision_status=ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.ROLL_BACK).count(),
+        }
         first_lesson = Lesson.objects.order_by("created_at").first()
         lesson_url = first_lesson.get_absolute_url() if first_lesson else reverse(
             "studio:lesson-create"
@@ -1017,6 +1036,546 @@ class ExperimentDecisionTuningExperimentSnapshotCompareExportView(StaffRequiredM
         return response
 
 
+
+REPORT_TEMPLATE_DEFINITIONS = [
+    {
+        "title": "Monthly Growth Review",
+        "slug": "monthly-growth-review",
+        "template_type": ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.MONTHLY_GROWTH,
+        "description": "Recurring monthly review for overall Code with Michael growth across social, resource, newsletter, CTA, and learner-conversion metrics.",
+        "default_report_title": "Monthly Growth Review",
+        "default_description": "Monthly decision-rule snapshot comparison for overall growth and learning impact.",
+        "default_notes": "Review follower growth, reach, engagement, resource downloads, newsletter clicks, CTA clicks, and learner conversions. Decide whether current decision rules should be kept, watched, or rolled back.",
+        "default_preset_keys": ["balanced_learning", "aggressive_growth"],
+        "recommended_snapshot_count": 3,
+        "recommended_window_days": 30,
+        "focus_areas": ["Follower growth", "Engagement", "Newsletter clicks", "Learner conversions"],
+    },
+    {
+        "title": "Lead Magnet Review",
+        "slug": "lead-magnet-review",
+        "template_type": ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.LEAD_MAGNET,
+        "description": "Review whether PDF resources and gated downloads are creating subscribers and downstream lesson activity.",
+        "default_report_title": "Lead Magnet Review",
+        "default_description": "Decision-rule comparison focused on resource unlocks, PDF downloads, email capture, and resource-to-lesson conversion.",
+        "default_notes": "Check PDF unlocks, downloads, new subscribers, CTA clicks, and resource-attributed learner conversions. Watch for vanity download volume without lesson activity.",
+        "default_preset_keys": ["lead_magnet_focus", "balanced_learning"],
+        "recommended_snapshot_count": 3,
+        "recommended_window_days": 14,
+        "focus_areas": ["PDF unlocks", "PDF downloads", "Subscribers", "Resource-to-lesson conversions"],
+    },
+    {
+        "title": "Instagram Experiment Review",
+        "slug": "instagram-experiment-review",
+        "template_type": ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.INSTAGRAM_EXPERIMENT,
+        "description": "Review Instagram-focused growth experiments, especially carousel formats, CTA behavior, and follower movement.",
+        "default_report_title": "Instagram Experiment Review",
+        "default_description": "Decision-rule comparison focused on Instagram growth, post engagement, clicks, and follow-through into beginner learning actions.",
+        "default_notes": "Compare follower growth, reach, engagement, clicks, CTA clicks, and conversions from Instagram-heavy posting periods. Note whether results justify continuing the rule profile.",
+        "default_preset_keys": ["aggressive_growth", "balanced_learning"],
+        "recommended_snapshot_count": 2,
+        "recommended_window_days": 14,
+        "focus_areas": ["Instagram reach", "Follower growth", "Carousel engagement", "CTA clicks"],
+    },
+    {
+        "title": "Learning Conversion Review",
+        "slug": "learning-conversion-review",
+        "template_type": ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.LEARNING_CONVERSION,
+        "description": "Review whether recommendation and decision rules are pushing learners toward lessons, quizzes, challenges, and completions.",
+        "default_report_title": "Learning Conversion Review",
+        "default_description": "Decision-rule comparison focused on lesson views, quiz attempts, challenge attempts, and completed lessons.",
+        "default_notes": "Prioritize meaningful beginner learning behavior over raw traffic. Compare lesson views, quiz attempts, challenge attempts, and lesson completions before deciding to keep or roll back.",
+        "default_preset_keys": ["balanced_learning", "conservative_quality"],
+        "recommended_snapshot_count": 3,
+        "recommended_window_days": 30,
+        "focus_areas": ["Lesson views", "Quiz attempts", "Challenge attempts", "Lesson completions"],
+    },
+]
+
+
+def ensure_default_report_templates(user=None):
+    """Create built-in report templates when the template library is first opened."""
+    for definition in REPORT_TEMPLATE_DEFINITIONS:
+        defaults = dict(definition)
+        slug = defaults.pop("slug")
+        defaults.setdefault("created_by", user if getattr(user, "is_authenticated", False) else None)
+        defaults.setdefault("updated_by", user if getattr(user, "is_authenticated", False) else None)
+        ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.get_or_create(slug=slug, defaults=defaults)
+
+
+def _recent_snapshot_ids_for_template(template):
+    count = max(1, min(int(template.recommended_snapshot_count or 3), 6))
+    qs = ExperimentDecisionTuningExperimentSnapshot.objects.select_related("change_log").order_by("-generated_at", "-pk")
+    if template.recommended_window_days:
+        filtered = qs.filter(window_days=template.recommended_window_days)
+        if filtered.exists():
+            qs = filtered
+    return [str(pk) for pk in qs.values_list("pk", flat=True)[:count]]
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateListView(StaffRequiredMixin, ListView):
+    model = ExperimentDecisionTuningSnapshotComparisonReportTemplate
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_templates.html"
+    context_object_name = "templates"
+
+    def dispatch(self, request, *args, **kwargs):
+        ensure_default_report_templates(request.user)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_queryset(self):
+        qs = ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.select_related("created_by", "updated_by")
+        q = self.request.GET.get("q", "").strip()
+        if q:
+            qs = qs.filter(Q(title__icontains=q) | Q(description__icontains=q) | Q(default_notes__icontains=q))
+        template_type = self.request.GET.get("template_type", "").strip()
+        if template_type:
+            qs = qs.filter(template_type=template_type)
+        active = self.request.GET.get("active", "").strip()
+        if active == "yes":
+            qs = qs.filter(is_active=True)
+        elif active == "no":
+            qs = qs.filter(is_active=False)
+        return qs
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["query"] = self.request.GET.get("q", "").strip()
+        context["template_type"] = self.request.GET.get("template_type", "").strip()
+        context["active"] = self.request.GET.get("active", "").strip()
+        context["template_type_choices"] = ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.choices
+        context["template_count"] = context["templates"].count() if hasattr(context["templates"], "count") else len(context["templates"])
+        return context
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateCreateView(StaffRequiredMixin, CreateView):
+    model = ExperimentDecisionTuningSnapshotComparisonReportTemplate
+    form_class = ExperimentDecisionTuningSnapshotComparisonReportTemplateForm
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_template_form.html"
+
+    def get_initial(self):
+        initial = super().get_initial()
+        initial["recommended_snapshot_count"] = 3
+        initial["recommended_window_days"] = 14
+        initial["is_active"] = True
+        return initial
+
+    def form_valid(self, form):
+        form.instance.created_by = self.request.user if self.request.user.is_authenticated else None
+        form.instance.updated_by = self.request.user if self.request.user.is_authenticated else None
+        if not form.instance.slug:
+            form.instance.slug = slugify(form.instance.title)
+        messages.success(self.request, "Created report template.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-detail", kwargs={"slug": self.object.slug})
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateUpdateView(StaffRequiredMixin, UpdateView):
+    model = ExperimentDecisionTuningSnapshotComparisonReportTemplate
+    form_class = ExperimentDecisionTuningSnapshotComparisonReportTemplateForm
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_template_form.html"
+    slug_field = "slug"
+    slug_url_kwarg = "slug"
+
+    def form_valid(self, form):
+        form.instance.updated_by = self.request.user if self.request.user.is_authenticated else None
+        messages.success(self.request, "Updated report template.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-detail", kwargs={"slug": self.object.slug})
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateDetailView(StaffRequiredMixin, DetailView):
+    model = ExperimentDecisionTuningSnapshotComparisonReportTemplate
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_template_detail.html"
+    context_object_name = "report_template"
+    slug_field = "slug"
+    slug_url_kwarg = "slug"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["suggested_snapshots"] = ExperimentDecisionTuningExperimentSnapshot.objects.select_related("change_log").filter(pk__in=_recent_snapshot_ids_for_template(self.object)).order_by("-generated_at", "-pk")
+        return context
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateDeleteView(StaffRequiredMixin, DeleteView):
+    model = ExperimentDecisionTuningSnapshotComparisonReportTemplate
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_template_confirm_delete.html"
+    slug_field = "slug"
+    slug_url_kwarg = "slug"
+    success_url = reverse_lazy("studio:experiment-decision-tuning-snapshot-comparison-report-templates")
+
+    def form_valid(self, form):
+        messages.success(self.request, "Deleted report template.")
+        return super().form_valid(form)
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportFromTemplateView(StaffRequiredMixin, CreateView):
+    model = ExperimentDecisionTuningSnapshotComparisonReport
+    form_class = ExperimentDecisionTuningSnapshotComparisonReportFromTemplateForm
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_from_template_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.report_template = get_object_or_404(ExperimentDecisionTuningSnapshotComparisonReportTemplate, slug=kwargs["slug"], is_active=True)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["template"] = self.report_template
+        return kwargs
+
+    def get_initial(self):
+        initial = self.report_template.build_report_initial()
+        initial["title"] = f"{initial['title']} · {timezone.now():%B %Y}"
+        initial["snapshots"] = _recent_snapshot_ids_for_template(self.report_template)
+        return initial
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["report_template"] = self.report_template
+        return context
+
+    def form_valid(self, form):
+        form.instance.created_by = self.request.user if self.request.user.is_authenticated else None
+        form.instance.updated_by = self.request.user if self.request.user.is_authenticated else None
+        form.instance.source_template = self.report_template
+        messages.success(self.request, f"Created saved report from the {self.report_template.title} template.")
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", kwargs={"pk": self.object.pk})
+
+
+
+def _template_usage_rows(template_queryset=None, report_queryset=None):
+    """Build template usage rows without relying on complex database-specific annotations."""
+    templates = list(
+        (template_queryset if template_queryset is not None else ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.all())
+        .prefetch_related("generated_reports__snapshots")
+        .select_related("created_by", "updated_by")
+        .order_by("template_type", "title")
+    )
+    reports = list(
+        (report_queryset if report_queryset is not None else ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(source_template__isnull=False))
+        .select_related("source_template", "created_by", "updated_by", "decision_owner")
+        .prefetch_related("snapshots")
+        .order_by("-updated_at", "-pk")
+    )
+    reports_by_template = {}
+    for report in reports:
+        if report.source_template_id:
+            reports_by_template.setdefault(report.source_template_id, []).append(report)
+
+    rows = []
+    decision_values = [choice[0] for choice in ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.choices]
+    for template in templates:
+        template_reports = reports_by_template.get(template.pk, [])
+        decision_counts = {key: 0 for key in decision_values}
+        snapshot_total = 0
+        preset_total = 0
+        last_report = None
+        for report in template_reports:
+            decision_counts[report.decision_status] = decision_counts.get(report.decision_status, 0) + 1
+            snapshot_total += report.snapshot_count
+            preset_total += report.preset_count
+            if last_report is None or report.updated_at > last_report.updated_at:
+                last_report = report
+        total_reports = len(template_reports)
+        rows.append({
+            "template": template,
+            "total_reports": total_reports,
+            "decision_counts": decision_counts,
+            "keep_count": decision_counts.get(ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.KEEP, 0),
+            "roll_back_count": decision_counts.get(ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.ROLL_BACK, 0),
+            "watch_count": decision_counts.get(ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.WATCH, 0),
+            "archived_count": decision_counts.get(ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.ARCHIVED, 0),
+            "undecided_count": decision_counts.get(ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED, 0),
+            "avg_snapshots": round(snapshot_total / total_reports, 1) if total_reports else 0,
+            "avg_presets": round(preset_total / total_reports, 1) if total_reports else 0,
+            "last_report": last_report,
+        })
+    return rows, reports
+
+
+def _template_type_usage_rows(rows):
+    grouped = {}
+    for row in rows:
+        template_type = row["template"].template_type
+        label = row["template"].get_template_type_display()
+        bucket = grouped.setdefault(template_type, {
+            "template_type": template_type,
+            "label": label,
+            "template_count": 0,
+            "total_reports": 0,
+            "keep_count": 0,
+            "roll_back_count": 0,
+            "watch_count": 0,
+            "archived_count": 0,
+            "undecided_count": 0,
+        })
+        bucket["template_count"] += 1
+        for key in ("total_reports", "keep_count", "roll_back_count", "watch_count", "archived_count", "undecided_count"):
+            bucket[key] += row[key]
+    return sorted(grouped.values(), key=lambda item: (-item["total_reports"], item["label"]))
+
+
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationsView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_template_recommendations.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        ensure_default_report_templates(self.request.user)
+        recommendations = build_report_template_recommendations(self.request.user, limit=12)
+        for recommendation in recommendations:
+            record_template_recommendation_shown(recommendation, self.request.user)
+        context.update({
+            "recommendations": recommendations,
+            "total_recommendations": len(recommendations),
+            "high_priority_count": sum(1 for item in recommendations if item.priority == "High"),
+            "medium_priority_count": sum(1 for item in recommendations if item.priority == "Medium"),
+            "low_priority_count": sum(1 for item in recommendations if item.priority == "Low"),
+        })
+        return context
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationsExportView(StaffRequiredMixin, TemplateView):
+    def get(self, request, *args, **kwargs):
+        ensure_default_report_templates(request.user)
+        recommendations = build_report_template_recommendations(request.user, limit=50)
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="decision_rule_report_template_recommendations.csv"'
+        writer = csv.writer(response)
+        writer.writerow([
+            "rank", "template_title", "template_type", "priority", "score", "base_score", "snapshot_focus_score", "usage_history_score", "focus_area_score", "preset_default_score", "feedback_adjustment", "recommended_window_days", "recommended_snapshot_count", "suggested_snapshot_ids", "suggested_snapshot_labels", "reasons", "feedback_notes",
+        ])
+        for index, recommendation in enumerate(recommendations, start=1):
+            writer.writerow([
+                index,
+                recommendation.template.title,
+                recommendation.template.get_template_type_display(),
+                recommendation.priority,
+                recommendation.score,
+                recommendation.score_parts.get("base", 0),
+                recommendation.score_parts.get("snapshot_focus", 0),
+                recommendation.score_parts.get("usage_history", 0),
+                recommendation.score_parts.get("focus_areas", 0),
+                recommendation.score_parts.get("preset_defaults", 0),
+                recommendation.score_parts.get("feedback", 0),
+                recommendation.template.recommended_window_days,
+                recommendation.template.recommended_snapshot_count,
+                ",".join(str(snapshot.pk) for snapshot in recommendation.suggested_snapshots),
+                " | ".join(snapshot.experiment_label for snapshot in recommendation.suggested_snapshots),
+                " | ".join(recommendation.reasons),
+                " | ".join(recommendation.feedback_notes),
+            ])
+        return response
+
+
+@method_decorator(require_POST, name="dispatch")
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedbackActionView(StaffRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        template = get_object_or_404(ExperimentDecisionTuningSnapshotComparisonReportTemplate, pk=request.POST.get("template_id"))
+        recommendation_key = request.POST.get("recommendation_key", "").strip()
+        status = request.POST.get("status", "").strip()
+        if not recommendation_key:
+            messages.error(request, "Missing recommendation key.")
+            return redirect("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations")
+        try:
+            score = int(request.POST.get("score", "0") or 0)
+        except ValueError:
+            score = 0
+        reasons = [item for item in request.POST.get("reasons", "").split("||") if item]
+        snapshot_ids = []
+        for value in request.POST.get("suggested_snapshot_ids", "").split(","):
+            if value.strip().isdigit():
+                snapshot_ids.append(int(value.strip()))
+        try:
+            feedback = record_template_recommendation_response(
+                template=template,
+                recommendation_key=recommendation_key,
+                status=status,
+                user=request.user,
+                score=score,
+                priority=request.POST.get("priority", ""),
+                reasons=reasons,
+                suggested_snapshot_ids=snapshot_ids,
+                notes=request.POST.get("notes", "").strip(),
+            )
+        except ValueError:
+            messages.error(request, "Invalid feedback action.")
+        else:
+            messages.success(request, f"Marked {template.title} recommendation as {feedback.get_status_display()}.")
+        return redirect("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations")
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedbackView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_template_feedback.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        qs = (
+            ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.objects
+            .select_related("template", "created_by", "updated_by")
+            .order_by("-last_seen_at", "template__title")
+        )
+        status = self.request.GET.get("status", "").strip()
+        template_type = self.request.GET.get("template_type", "").strip()
+        q = self.request.GET.get("q", "").strip()
+        if status:
+            qs = qs.filter(status=status)
+        if template_type:
+            qs = qs.filter(template__template_type=template_type)
+        if q:
+            qs = qs.filter(Q(template__title__icontains=q) | Q(recommendation_key__icontains=q) | Q(notes__icontains=q))
+        feedback = list(qs[:200])
+        context.update({
+            "feedback": feedback,
+            "status": status,
+            "template_type": template_type,
+            "q": q,
+            "status_choices": ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.Status.choices,
+            "template_type_choices": ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.choices,
+            "total_feedback": len(feedback),
+            "useful_count": sum(1 for item in feedback if item.status == item.Status.USEFUL),
+            "dismissed_count": sum(1 for item in feedback if item.status == item.Status.DISMISSED),
+            "revisit_count": sum(1 for item in feedback if item.status == item.Status.REVISIT),
+            "ignored_count": sum(1 for item in feedback if item.is_ignored_signal),
+        })
+        return context
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedbackExportView(StaffRequiredMixin, TemplateView):
+    def get(self, request, *args, **kwargs):
+        qs = ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.objects.select_related("template", "created_by", "updated_by").order_by("-last_seen_at")
+        status = request.GET.get("status", "").strip()
+        template_type = request.GET.get("template_type", "").strip()
+        q = request.GET.get("q", "").strip()
+        if status:
+            qs = qs.filter(status=status)
+        if template_type:
+            qs = qs.filter(template__template_type=template_type)
+        if q:
+            qs = qs.filter(Q(template__title__icontains=q) | Q(recommendation_key__icontains=q) | Q(notes__icontains=q))
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="decision_rule_report_template_recommendation_feedback.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["template_title", "template_type", "recommendation_key", "status", "times_shown", "score", "priority", "suggested_snapshot_ids", "notes", "first_seen_at", "last_seen_at", "responded_at", "created_by", "updated_by", "reasons"])
+        for item in qs:
+            writer.writerow([
+                item.template.title,
+                item.template.get_template_type_display(),
+                item.recommendation_key,
+                item.get_status_display(),
+                item.times_shown,
+                item.score,
+                item.priority,
+                ",".join(str(value) for value in (item.suggested_snapshot_ids or [])),
+                item.notes,
+                item.first_seen_at.isoformat() if item.first_seen_at else "",
+                item.last_seen_at.isoformat() if item.last_seen_at else "",
+                item.responded_at.isoformat() if item.responded_at else "",
+                getattr(item.created_by, "email", ""),
+                getattr(item.updated_by, "email", ""),
+                " | ".join(item.reasons or []),
+            ])
+        return response
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateUsageView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_template_usage.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        ensure_default_report_templates(self.request.user)
+        template_qs = ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.all()
+        report_qs = ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(source_template__isnull=False)
+
+        template_type = self.request.GET.get("template_type", "").strip()
+        if template_type:
+            template_qs = template_qs.filter(template_type=template_type)
+            report_qs = report_qs.filter(source_template__template_type=template_type)
+        active = self.request.GET.get("active", "").strip()
+        if active == "yes":
+            template_qs = template_qs.filter(is_active=True)
+            report_qs = report_qs.filter(source_template__is_active=True)
+        elif active == "no":
+            template_qs = template_qs.filter(is_active=False)
+            report_qs = report_qs.filter(source_template__is_active=False)
+        decision_status = self.request.GET.get("decision_status", "").strip()
+        if decision_status:
+            report_qs = report_qs.filter(decision_status=decision_status)
+
+        rows, reports = _template_usage_rows(template_qs, report_qs)
+        context.update({
+            "rows": rows,
+            "type_rows": _template_type_usage_rows(rows),
+            "recent_reports": reports[:12],
+            "template_type": template_type,
+            "active": active,
+            "decision_status": decision_status,
+            "template_type_choices": ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.choices,
+            "decision_status_choices": ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.choices,
+            "total_templates": len(rows),
+            "active_templates": sum(1 for row in rows if row["template"].is_active),
+            "total_reports": sum(row["total_reports"] for row in rows),
+            "total_keep": sum(row["keep_count"] for row in rows),
+            "total_roll_back": sum(row["roll_back_count"] for row in rows),
+            "total_watch": sum(row["watch_count"] for row in rows),
+        })
+        return context
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateUsageExportView(StaffRequiredMixin, TemplateView):
+    def get(self, request, *args, **kwargs):
+        ensure_default_report_templates(request.user)
+        template_qs = ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.all()
+        report_qs = ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(source_template__isnull=False)
+        template_type = request.GET.get("template_type", "").strip()
+        if template_type:
+            template_qs = template_qs.filter(template_type=template_type)
+            report_qs = report_qs.filter(source_template__template_type=template_type)
+        active = request.GET.get("active", "").strip()
+        if active == "yes":
+            template_qs = template_qs.filter(is_active=True)
+            report_qs = report_qs.filter(source_template__is_active=True)
+        elif active == "no":
+            template_qs = template_qs.filter(is_active=False)
+            report_qs = report_qs.filter(source_template__is_active=False)
+        decision_status = request.GET.get("decision_status", "").strip()
+        if decision_status:
+            report_qs = report_qs.filter(decision_status=decision_status)
+        rows, _reports = _template_usage_rows(template_qs, report_qs)
+
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="decision_rule_report_template_usage.csv"'
+        writer = csv.writer(response)
+        writer.writerow([
+            "template_title", "template_type", "active", "reports_created", "keep", "roll_back", "watch", "archived", "undecided", "avg_snapshots", "avg_presets", "last_report_title", "last_report_updated",
+        ])
+        for row in rows:
+            last = row["last_report"]
+            writer.writerow([
+                row["template"].title,
+                row["template"].get_template_type_display(),
+                "yes" if row["template"].is_active else "no",
+                row["total_reports"],
+                row["keep_count"],
+                row["roll_back_count"],
+                row["watch_count"],
+                row["archived_count"],
+                row["undecided_count"],
+                row["avg_snapshots"],
+                row["avg_presets"],
+                last.title if last else "",
+                timezone.localtime(last.updated_at).strftime("%Y-%m-%d %H:%M") if last else "",
+            ])
+        return response
+
+
 class ExperimentDecisionTuningSnapshotComparisonReportListView(StaffRequiredMixin, ListView):
     model = ExperimentDecisionTuningSnapshotComparisonReport
     template_name = "studio/experiment_decision_tuning_snapshot_comparison_reports.html"
@@ -1026,7 +1585,7 @@ class ExperimentDecisionTuningSnapshotComparisonReportListView(StaffRequiredMixi
         qs = (
             ExperimentDecisionTuningSnapshotComparisonReport.objects
             .prefetch_related("snapshots")
-            .select_related("created_by", "updated_by", "decision_owner", "decision_recorded_by")
+            .select_related("created_by", "updated_by", "decision_owner", "decision_recorded_by", "cloned_from", "source_template")
         )
         q = self.request.GET.get("q", "").strip()
         if q:
@@ -1102,13 +1661,61 @@ class ExperimentDecisionTuningSnapshotComparisonReportUpdateView(StaffRequiredMi
         return reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", kwargs={"pk": self.object.pk})
 
 
+
+
+class ExperimentDecisionTuningSnapshotComparisonReportCloneView(StaffRequiredMixin, FormView):
+    template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_clone.html"
+    form_class = ExperimentDecisionTuningSnapshotComparisonReportCloneForm
+
+    def dispatch(self, request, *args, **kwargs):
+        self.source_report = get_object_or_404(
+            ExperimentDecisionTuningSnapshotComparisonReport.objects.prefetch_related("snapshots"),
+            pk=kwargs["pk"],
+        )
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_initial(self):
+        return {
+            "title": f"Copy of {self.source_report.title}",
+            "description": self.source_report.description,
+            "notes": self.source_report.notes,
+        }
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["source_report"] = self.source_report
+        context["source_snapshots"] = list(self.source_report.snapshots.select_related("change_log").order_by("-generated_at", "-pk"))
+        context["source_preset_count"] = len(self.source_report.preset_keys or [])
+        return context
+
+    @transaction.atomic
+    def form_valid(self, form):
+        cloned_report = ExperimentDecisionTuningSnapshotComparisonReport.objects.create(
+            title=form.cleaned_data["title"],
+            description=form.cleaned_data.get("description", ""),
+            notes=form.cleaned_data.get("notes", ""),
+            preset_keys=list(self.source_report.preset_keys or []),
+            cloned_from=self.source_report,
+            source_template=self.source_report.source_template,
+            created_by=self.request.user if self.request.user.is_authenticated else None,
+            updated_by=self.request.user if self.request.user.is_authenticated else None,
+            decision_status=ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED,
+        )
+        cloned_report.snapshots.set(self.source_report.snapshots.all())
+        messages.success(self.request, "Cloned saved snapshot comparison report. Decision fields were reset for the new report.")
+        self.object = cloned_report
+        return redirect(self.get_success_url())
+
+    def get_success_url(self):
+        return reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", kwargs={"pk": self.object.pk})
+
 class ExperimentDecisionTuningSnapshotComparisonReportDetailView(StaffRequiredMixin, DetailView):
     model = ExperimentDecisionTuningSnapshotComparisonReport
     template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_detail.html"
     context_object_name = "report"
 
     def get_queryset(self):
-        return super().get_queryset().prefetch_related("snapshots__change_log").select_related("created_by", "updated_by", "decision_owner", "decision_recorded_by")
+        return super().get_queryset().prefetch_related("snapshots__change_log").select_related("created_by", "updated_by", "decision_owner", "decision_recorded_by", "cloned_from", "source_template")
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -3958,6 +4565,12 @@ class ResourceCTARecommendationFeedbackReportView(StaffRequiredMixin, TemplateVi
         context["selected_status"] = status
         context["selected_target_type"] = target_type
         context["recommendation_tuning"] = RecommendationTuning.get_active()
+        context["report_template_totals"] = {
+            "templates": ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.count(),
+            "generated_reports": ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(source_template__isnull=False).count(),
+            "keep": ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(source_template__isnull=False, decision_status=ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.KEEP).count(),
+            "roll_back": ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(source_template__isnull=False, decision_status=ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.ROLL_BACK).count(),
+        }
         context["summary"] = {
             "shown": ResourceCTARecommendationFeedback.objects.filter(status=ResourceCTARecommendationFeedback.Status.SHOWN).count(),
             "accepted": ResourceCTARecommendationFeedback.objects.filter(status=ResourceCTARecommendationFeedback.Status.ACCEPTED).count(),

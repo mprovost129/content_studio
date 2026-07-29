@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Delete report template{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">DELETE</span>
+        <h1>Delete report template?</h1>
+        <p>{{ object.title }}</p>
+    </div>
+</section>
+<section class="panel mt-4">
+    <form method="post">
+        {% csrf_token %}
+        <p>This deletes the reusable template only. Saved reports created from it will remain.</p>
+        <button class="btn btn-danger" type="submit">Delete template</button>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-detail' object.slug %}">Cancel</a>
+    </form>
+</section>
+{% endblock %}

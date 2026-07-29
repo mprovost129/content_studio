@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Report template recommendations{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">REPORT TEMPLATES</span>
+        <h1>Template recommendations</h1>
+        <p>Suggested saved-report templates to use next, based on recent decision-rule snapshots, underused template families, and prior Keep / Roll back / Watch outcomes.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-primary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations-export' %}">Export CSV</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback' %}">Feedback history</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}">Template usage</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-templates' %}">Report templates</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-card"><span>Recommendations</span><strong>{{ total_recommendations }}</strong></div>
+    <div class="stat-card"><span>High priority</span><strong>{{ high_priority_count }}</strong></div>
+    <div class="stat-card"><span>Medium priority</span><strong>{{ medium_priority_count }}</strong></div>
+    <div class="stat-card"><span>Low priority</span><strong>{{ low_priority_count }}</strong></div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Recommended templates</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Template</th>
+                    <th>Priority</th>
+                    <th>Score</th>
+                    <th>Suggested snapshots</th>
+                    <th>Why this template</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in recommendations %}
+                <tr>
+                    <td>{{ forloop.counter }}</td>
+                    <td>
+                        <strong><a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-detail' item.template.slug %}">{{ item.template.title }}</a></strong><br>
+                        <small>{{ item.template.get_template_type_display }} · {{ item.template.recommended_window_days }} day window · {{ item.template.recommended_snapshot_count }} snapshot target</small>
+                    </td>
+                    <td><span class="badge badge-{% if item.priority == 'High' %}keep{% elif item.priority == 'Medium' %}inconclusive{% else %}neutral{% endif %}">{{ item.priority }}</span></td>
+                    <td>
+                        <strong>{{ item.score }}</strong><br>
+                        <small>Base {{ item.score_parts.base|default:0 }} · Snapshot {{ item.score_parts.snapshot_focus|default:0 }} · Usage {{ item.score_parts.usage_history|default:0 }} · Feedback {{ item.score_parts.feedback|default:0 }}</small>
+                    </td>
+                    <td>
+                        {% for snapshot in item.suggested_snapshots %}
+                        <div><a href="{% url 'studio:experiment-decision-tuning-experiment-snapshot-detail' snapshot.pk %}">{{ snapshot.experiment_label }}</a> <small>({{ snapshot.window_days }}d)</small></div>
+                        {% empty %}
+                        <span class="muted">Create snapshots first</span>
+                        {% endfor %}
+                    </td>
+                    <td>
+                        <ul class="compact-list">
+                            {% for reason in item.reasons %}<li>{{ reason }}</li>{% endfor %}
+                        </ul>
+                    </td>
+                    <td>
+                        <a class="btn btn-primary btn-sm" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-from-template' item.template.slug %}">Create report</a>
+                        <div class="mt-2 stack-sm">
+                            <form method="post" action="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback-action' %}">{% csrf_token %}
+                                <input type="hidden" name="template_id" value="{{ item.template.pk }}">
+                                <input type="hidden" name="recommendation_key" value="{{ item.recommendation_key }}">
+                                <input type="hidden" name="status" value="useful">
+                                <input type="hidden" name="score" value="{{ item.score }}">
+                                <input type="hidden" name="priority" value="{{ item.priority }}">
+                                <input type="hidden" name="suggested_snapshot_ids" value="{% for snapshot in item.suggested_snapshots %}{{ snapshot.pk }}{% if not forloop.last %},{% endif %}{% endfor %}">
+                                <input type="hidden" name="reasons" value="{% for reason in item.reasons %}{{ reason }}{% if not forloop.last %}||{% endif %}{% endfor %}">
+                                <button class="btn btn-secondary btn-sm" type="submit">Useful</button>
+                            </form>
+                            <form method="post" action="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback-action' %}">{% csrf_token %}
+                                <input type="hidden" name="template_id" value="{{ item.template.pk }}">
+                                <input type="hidden" name="recommendation_key" value="{{ item.recommendation_key }}">
+                                <input type="hidden" name="status" value="revisit">
+                                <input type="hidden" name="score" value="{{ item.score }}">
+                                <input type="hidden" name="priority" value="{{ item.priority }}">
+                                <input type="hidden" name="suggested_snapshot_ids" value="{% for snapshot in item.suggested_snapshots %}{{ snapshot.pk }}{% if not forloop.last %},{% endif %}{% endfor %}">
+                                <input type="hidden" name="reasons" value="{% for reason in item.reasons %}{{ reason }}{% if not forloop.last %}||{% endif %}{% endfor %}">
+                                <button class="btn btn-secondary btn-sm" type="submit">Revisit</button>
+                            </form>
+                            <form method="post" action="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback-action' %}">{% csrf_token %}
+                                <input type="hidden" name="template_id" value="{{ item.template.pk }}">
+                                <input type="hidden" name="recommendation_key" value="{{ item.recommendation_key }}">
+                                <input type="hidden" name="status" value="dismissed">
+                                <input type="hidden" name="score" value="{{ item.score }}">
+                                <input type="hidden" name="priority" value="{{ item.priority }}">
+                                <input type="hidden" name="suggested_snapshot_ids" value="{% for snapshot in item.suggested_snapshots %}{{ snapshot.pk }}{% if not forloop.last %},{% endif %}{% endfor %}">
+                                <input type="hidden" name="reasons" value="{% for reason in item.reasons %}{{ reason }}{% if not forloop.last %}||{% endif %}{% endfor %}">
+                                <button class="btn btn-danger btn-sm" type="submit">Dismiss</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7">No active report templates are available yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>How recommendations are ranked</h2></div>
+    <p>Studio combines recent snapshot availability, the template’s recommended window, prior report decisions, underused template families, focus areas, preset defaults, and your feedback. Mark a recommendation useful to boost similar suggestions, dismiss it to reduce future ranking, or mark it revisit later to keep it available without treating it as urgent.</p>
+</section>
+{% endblock %}
