@@ -9,7 +9,6 @@ from studio.models import (
     ReportTemplateRecommendationTuningDecisionRulesChangeLog,
 )
 
-
 EXCLUDED_FIELDS = {"id", "created_at", "updated_at"}
 
 
@@ -21,11 +20,18 @@ def report_template_decision_rule_field_names() -> list[str]:
     ]
 
 
-def report_template_decision_rule_snapshot(rules: ReportTemplateRecommendationTuningDecisionRules) -> dict[str, Any]:
-    return {name: getattr(rules, name) for name in report_template_decision_rule_field_names()}
+def report_template_decision_rule_snapshot(
+    rules: ReportTemplateRecommendationTuningDecisionRules,
+) -> dict[str, Any]:
+    return {
+        name: getattr(rules, name)
+        for name in report_template_decision_rule_field_names()
+    }
 
 
-def build_report_template_decision_rule_diff(before: dict[str, Any], after: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def build_report_template_decision_rule_diff(
+    before: dict[str, Any], after: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
     diff: dict[str, dict[str, Any]] = {}
     for key in sorted(set(before.keys()) | set(after.keys())):
         old = before.get(key)
@@ -49,19 +55,26 @@ def create_report_template_decision_rule_change_log(
 ) -> ReportTemplateRecommendationTuningDecisionRulesChangeLog | None:
     after = report_template_decision_rule_snapshot(rules)
     diff = build_report_template_decision_rule_diff(before, after)
-    if not diff and action == ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.MANUAL_UPDATE:
+    if (
+        not diff
+        and action
+        == ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.MANUAL_UPDATE
+    ):
         return None
     return ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.create(
         decision_rules=rules,
         action=action,
-        changed_by=changed_by if getattr(changed_by, "is_authenticated", False) else None,
+        changed_by=changed_by
+        if getattr(changed_by, "is_authenticated", False)
+        else None,
         reason=reason,
         before=before,
         after=after,
         diff=diff,
         request_path=request_path[:300],
         experiment_label=(experiment_label or "").strip(),
-        experiment_status=experiment_status or ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+        experiment_status=experiment_status
+        or ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.NOT_EXPERIMENT,
         experiment_notes=(experiment_notes or "").strip(),
     )
 
@@ -89,6 +102,7 @@ def restore_report_template_decision_rule_snapshot(
         before=before,
         action=ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.ROLLBACK_RESTORED,
         changed_by=changed_by,
-        reason=reason or f"Restored {snapshot}-change template-recommendation decision-rule snapshot from log #{source_log.pk}.",
+        reason=reason
+        or f"Restored {snapshot}-change template-recommendation decision-rule snapshot from log #{source_log.pk}.",
         request_path=request_path,
     )

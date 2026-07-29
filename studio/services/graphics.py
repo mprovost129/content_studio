@@ -94,13 +94,20 @@ def _draw_python_mark_fallback(draw, x: int, y: int, size: int):
     yellow = (255, 212, 59)
     half = size // 2
     radius = max(size // 8, 5)
-    draw.rounded_rectangle((x, y, x + half + 8, y + half + 12), radius=radius, fill=blue)
+    draw.rounded_rectangle(
+        (x, y, x + half + 8, y + half + 12), radius=radius, fill=blue
+    )
     draw.rounded_rectangle(
         (x + half - 8, y + half - 12, x + size, y + size), radius=radius, fill=yellow
     )
     eye = max(size // 18, 3)
-    draw.ellipse((x + half - eye * 3, y + eye * 3, x + half - eye, y + eye * 5), fill=(8, 20, 35))
-    draw.ellipse((x + half + eye, y + size - eye * 5, x + half + eye * 3, y + size - eye * 3), fill=(8, 20, 35))
+    draw.ellipse(
+        (x + half - eye * 3, y + eye * 3, x + half - eye, y + eye * 5), fill=(8, 20, 35)
+    )
+    draw.ellipse(
+        (x + half + eye, y + size - eye * 5, x + half + eye * 3, y + size - eye * 3),
+        fill=(8, 20, 35),
+    )
 
 
 @lru_cache(maxsize=8)
@@ -173,7 +180,9 @@ def _chunk_blocks(lesson: Lesson, output_format: str):
     return blocks
 
 
-def _card_height(draw, block: RenderBlock, body_font, mono_font, width: int, padding: int):
+def _card_height(
+    draw, block: RenderBlock, body_font, mono_font, width: int, padding: int
+):
     font = mono_font if block.block_type in {"code", "output"} else body_font
     if block.block_type in {"code", "output"}:
         line_count = max(1, len(block.content.splitlines()))
@@ -183,7 +192,9 @@ def _card_height(draw, block: RenderBlock, body_font, mono_font, width: int, pad
     return padding * 2 + title_height + line_count * int(font.size * 1.45)
 
 
-def _draw_card(draw, block, x, y, width, height, accent, body_font, mono_font, small_bold):
+def _draw_card(
+    draw, block, x, y, width, height, accent, body_font, mono_font, small_bold
+):
     colors = {
         "output": ((5, 36, 15, 245), (69, 190, 85, 255)),
         "challenge": ((31, 25, 5, 245), (244, 199, 42, 255)),
@@ -192,7 +203,13 @@ def _draw_card(draw, block, x, y, width, height, accent, body_font, mono_font, s
     }
     fill, border = colors.get(block.block_type, ((13, 18, 37, 245), accent))
     radius = max(12, width // 60)
-    draw.rounded_rectangle((x, y, x + width, y + height), radius=radius, fill=fill, outline=border, width=max(2, width // 350))
+    draw.rounded_rectangle(
+        (x, y, x + width, y + height),
+        radius=radius,
+        fill=fill,
+        outline=border,
+        width=max(2, width // 350),
+    )
     padding = max(18, width // 45)
     cursor = y + padding
     if block.title:
@@ -202,14 +219,20 @@ def _draw_card(draw, block, x, y, width, height, accent, body_font, mono_font, s
     content_color = (226, 232, 244, 255)
     if block.block_type == "output":
         content_color = (157, 232, 163, 255)
-    lines = block.content.splitlines() if block.block_type in {"code", "output"} else _wrap(draw, block.content, font, width - padding * 2)
+    lines = (
+        block.content.splitlines()
+        if block.block_type in {"code", "output"}
+        else _wrap(draw, block.content, font, width - padding * 2)
+    )
     line_height = int(font.size * 1.45)
     for line in lines:
         draw.text((x + padding, cursor), line, font=font, fill=content_color)
         cursor += line_height
 
 
-def _render_slide(lesson, brand, template, output_format, blocks, slide_number, total_slides):
+def _render_slide(
+    lesson, brand, template, output_format, blocks, slide_number, total_slides
+):
     try:
         from PIL import Image, ImageDraw
     except ImportError as exc:
@@ -240,15 +263,30 @@ def _render_slide(lesson, brand, template, output_format, blocks, slide_number, 
 
     label = template.get_template_type_display().upper()
     if lesson.series_id and lesson.series_position:
-        total = f" OF {lesson.series.total_lessons}" if lesson.series.total_lessons else ""
+        total = (
+            f" OF {lesson.series.total_lessons}" if lesson.series.total_lessons else ""
+        )
         label = f"{lesson.series.title.upper()}  •  DAY {lesson.series_position}{total}"
     label_box = draw.textbbox((0, 0), label, font=label_font)
     label_width = min(width - margin * 2 - logo_size, label_box[2] + margin)
     label_height = int(label_font.size * 1.7)
-    draw.rounded_rectangle((margin, margin // 2, margin + label_width, margin // 2 + label_height), radius=label_height // 2, fill=accent)
-    draw.text((margin + label_height // 2, margin // 2 + int(label_font.size * 0.2)), label, font=label_font, fill=(7, 12, 25, 255))
+    draw.rounded_rectangle(
+        (margin, margin // 2, margin + label_width, margin // 2 + label_height),
+        radius=label_height // 2,
+        fill=accent,
+    )
+    draw.text(
+        (margin + label_height // 2, margin // 2 + int(label_font.size * 0.2)),
+        label,
+        font=label_font,
+        fill=(7, 12, 25, 255),
+    )
 
-    title = lesson.title if slide_number == 1 else f"{lesson.title}  •  {slide_number}/{total_slides}"
+    title = (
+        lesson.title
+        if slide_number == 1
+        else f"{lesson.title}  •  {slide_number}/{total_slides}"
+    )
     title_max_width = width - margin * 2
     title_lines = _wrap(draw, title, title_font, title_max_width)
     cursor = margin // 2 + label_height + max(18, int(25 * scale))
@@ -262,23 +300,51 @@ def _render_slide(lesson, brand, template, output_format, blocks, slide_number, 
         )
         draw.text((margin, cursor), line, font=title_font, fill=(225, 232, 243, 255))
         cursor += title_line_height
-    draw.rectangle((margin, cursor + 8, width - margin, cursor + 12), fill=(47, 76, 132, 255))
-    draw.rectangle((margin, cursor + 8, margin + int((width - margin * 2) * 0.24), cursor + 12), fill=accent)
+    draw.rectangle(
+        (margin, cursor + 8, width - margin, cursor + 12), fill=(47, 76, 132, 255)
+    )
+    draw.rectangle(
+        (margin, cursor + 8, margin + int((width - margin * 2) * 0.24), cursor + 12),
+        fill=accent,
+    )
     cursor += max(28, int(34 * scale))
 
     content_width = width - margin * 2
     padding = max(18, content_width // 45)
     gap = max(14, int(18 * scale))
     for block in blocks:
-        card_height = _card_height(draw, block, body_font, mono_font, content_width, padding)
-        _draw_card(draw, block, margin, cursor, content_width, card_height, accent, body_font, mono_font, small_bold)
+        card_height = _card_height(
+            draw, block, body_font, mono_font, content_width, padding
+        )
+        _draw_card(
+            draw,
+            block,
+            margin,
+            cursor,
+            content_width,
+            card_height,
+            accent,
+            body_font,
+            mono_font,
+            small_bold,
+        )
         cursor += card_height + gap
 
     footer_y = height - max(72, int(90 * scale))
     handle_box = draw.textbbox((0, 0), brand.social_handle, font=handle_font)
     handle_x = (width - (handle_box[2] - handle_box[0])) // 2
-    draw.text((handle_x + 3, footer_y + 3), brand.social_handle, font=handle_font, fill=(14, 63, 130, 255))
-    draw.text((handle_x, footer_y), brand.social_handle, font=handle_font, fill=(76, 157, 240, 255))
+    draw.text(
+        (handle_x + 3, footer_y + 3),
+        brand.social_handle,
+        font=handle_font,
+        fill=(14, 63, 130, 255),
+    )
+    draw.text(
+        (handle_x, footer_y),
+        brand.social_handle,
+        font=handle_font,
+        fill=(76, 157, 240, 255),
+    )
     return image.convert("RGB")
 
 
@@ -301,7 +367,9 @@ def _paginate(lesson, brand, template, output_format):
     current = []
     used = 0
     for block in _chunk_blocks(lesson, output_format):
-        card_height = _card_height(draw, block, body_font, mono_font, content_width, padding)
+        card_height = _card_height(
+            draw, block, body_font, mono_font, content_width, padding
+        )
         if current and used + card_height > available:
             pages.append(current)
             current = []
@@ -347,9 +415,13 @@ def generate_graphics(lesson: Lesson, template: GraphicTemplate, output_formats)
                 image.save(buffer, format="PNG", optimize=True)
                 image.close()
                 timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
-                filename = f"{lesson.slug}-{output_format}-{slide_number}-{timestamp}.png"
+                filename = (
+                    f"{lesson.slug}-{output_format}-{slide_number}-{timestamp}.png"
+                )
                 with transaction.atomic():
-                    asset.file.save(filename, ContentFile(buffer.getvalue()), save=False)
+                    asset.file.save(
+                        filename, ContentFile(buffer.getvalue()), save=False
+                    )
                     asset.status = GraphicAsset.Status.READY
                     asset.save()
                 created.append(asset)

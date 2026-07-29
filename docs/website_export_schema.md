@@ -1,6 +1,6 @@
 # Website lesson export contract
 
-Schema version: `1.5`
+Schema version: `1.6`
 
 The Content Studio produces immutable, numbered export revisions. Every revision contains a standalone HTML page and a JSON document intended for future ingestion by the existing Code with Michael website.
 

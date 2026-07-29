@@ -8,8 +8,8 @@ from django.utils.text import slugify
 
 from studio.models import (
     Category,
-    CodeChallenge,
     ChallengeTestCase,
+    CodeChallenge,
     Lesson,
     LessonBlock,
     QuizChoice,
@@ -23,10 +23,10 @@ class LessonIdeaDraft:
     audience: str
     objective: str
     category: Category | None = None
-    series=None
+    series = None
     include_quiz: bool = True
     include_challenge: bool = True
-    created_by=None
+    created_by = None
 
 
 def _sentence_case(value: str) -> str:
@@ -45,7 +45,18 @@ def _safe_function_name(topic: str) -> str:
 
 
 def _is_money_topic(topic: str) -> bool:
-    keywords = ("money", "price", "cost", "budget", "sale", "sales", "tax", "tip", "discount", "dollar")
+    keywords = (
+        "money",
+        "price",
+        "cost",
+        "budget",
+        "sale",
+        "sales",
+        "tax",
+        "tip",
+        "discount",
+        "dollar",
+    )
     lowered = topic.lower()
     return any(word in lowered for word in keywords)
 
@@ -57,12 +68,12 @@ def _example_code(topic: str) -> tuple[str, str]:
             "item_price = 25\n"
             "quantity = 3\n"
             "total = item_price * quantity\n"
-            "print(f\"Total: ${total}\")"
+            'print(f"Total: ${total}")'
         )
         return code, "Total: $75"
     if "list" in lowered:
         code = (
-            "favorite_languages = [\"Python\", \"JavaScript\", \"HTML\"]\n"
+            'favorite_languages = ["Python", "JavaScript", "HTML"]\n'
             "for language in favorite_languages:\n"
             "    print(language)"
         )
@@ -72,15 +83,13 @@ def _example_code(topic: str) -> tuple[str, str]:
         return code, "1\n2\n3"
     if "function" in lowered:
         code = (
-            "def greet(name):\n"
-            "    return f\"Hello, {name}!\"\n\n"
-            "print(greet(\"Michael\"))"
+            'def greet(name):\n    return f"Hello, {name}!"\n\nprint(greet("Michael"))'
         )
         return code, "Hello, Michael!"
     if "condition" in lowered or "if" in lowered:
-        code = "score = 85\nif score >= 70:\n    print(\"Passed\")\nelse:\n    print(\"Try again\")"
+        code = 'score = 85\nif score >= 70:\n    print("Passed")\nelse:\n    print("Try again")'
         return code, "Passed"
-    code = "message = \"I am learning Python\"\nprint(message)"
+    code = 'message = "I am learning Python"\nprint(message)'
     return code, "I am learning Python"
 
 
@@ -92,34 +101,39 @@ def _starter_solution(topic: str) -> tuple[str, str, str, str]:
             "    # TODO: return the total cost\n"
             "    pass\n"
         )
-        solution = "def calculate_total(price, quantity):\n    return price * quantity\n"
-        tests = "assert calculate_total(5, 3) == 15\nassert calculate_total(12, 2) == 24\nprint(\"passed\")"
+        solution = (
+            "def calculate_total(price, quantity):\n    return price * quantity\n"
+        )
+        tests = 'assert calculate_total(5, 3) == 15\nassert calculate_total(12, 2) == 24\nprint("passed")'
         return starter, solution, tests, "passed"
     if "function" in topic.lower():
         starter = (
-            "def greet(name):\n"
-            "    # TODO: return a greeting using the name\n"
-            "    pass\n"
+            "def greet(name):\n    # TODO: return a greeting using the name\n    pass\n"
         )
-        solution = "def greet(name):\n    return f\"Hello, {name}!\"\n"
-        tests = "assert greet(\"Michael\") == \"Hello, Michael!\"\nassert greet(\"Python\") == \"Hello, Python!\"\nprint(\"passed\")"
+        solution = 'def greet(name):\n    return f"Hello, {name}!"\n'
+        tests = 'assert greet("Michael") == "Hello, Michael!"\nassert greet("Python") == "Hello, Python!"\nprint("passed")'
         return starter, solution, tests, "passed"
     starter = (
         f"def {function_name}():\n"
         "    # TODO: return a short message about what you learned\n"
         "    pass\n"
     )
-    solution = f"def {function_name}():\n    return \"I can explain this Python idea.\"\n"
-    tests = f"assert {function_name}() == \"I can explain this Python idea.\"\nprint(\"passed\")"
+    solution = f'def {function_name}():\n    return "I can explain this Python idea."\n'
+    tests = f'assert {function_name}() == "I can explain this Python idea."\nprint("passed")'
     return starter, solution, tests, "passed"
 
 
 def build_lesson_outline(draft: LessonIdeaDraft) -> dict:
     topic = _sentence_case(draft.topic)
     audience = draft.audience or "absolute beginners"
-    objective = draft.objective or f"Learner can explain and use {topic.lower()} in a small Python example."
+    objective = (
+        draft.objective
+        or f"Learner can explain and use {topic.lower()} in a small Python example."
+    )
     example_code, expected_output = _example_code(topic)
-    starter_code, solution_code, test_code, test_expected_output = _starter_solution(topic)
+    starter_code, solution_code, test_code, test_expected_output = _starter_solution(
+        topic
+    )
 
     return {
         "title": topic,
@@ -127,14 +141,16 @@ def build_lesson_outline(draft: LessonIdeaDraft) -> dict:
         "learning_objective": objective,
         "beginner_takeaway": f"{topic} is easier when you focus on one small example, run it, and read the output line by line.",
         "common_mistake": "Beginners often copy the code without checking what each line changes. Encourage learners to predict the output before running it.",
-        "practice_prompt": f"Change the example so it uses your own values, then run it again and explain what changed in the output.",
+        "practice_prompt": "Change the example so it uses your own values, then run it again and explain what changed in the output.",
         "starter_code": starter_code,
         "solution_code": solution_code,
         "expected_output": test_expected_output,
         "hint_1": "Start by reading the function name, parameters, and expected output.",
         "hint_2": "Return the final value from the function instead of only printing it.",
         "seo_title": f"{topic} in Python for Beginners"[:70],
-        "seo_description": f"Learn {topic.lower()} in Python with a simple explanation, runnable example, beginner mistake, quiz, and practice challenge."[:170],
+        "seo_description": f"Learn {topic.lower()} in Python with a simple explanation, runnable example, beginner mistake, quiz, and practice challenge."[
+            :170
+        ],
         "blocks": [
             {
                 "position": 1,
@@ -167,7 +183,10 @@ def build_lesson_outline(draft: LessonIdeaDraft) -> dict:
         "quiz": {
             "prompt": f"What is the best first step when learning {topic.lower()}?",
             "choices": [
-                ("Run a small example and compare the output to what you expected.", True),
+                (
+                    "Run a small example and compare the output to what you expected.",
+                    True,
+                ),
                 ("Memorize every Python rule before writing any code.", False),
                 ("Skip the output because only the code matters.", False),
             ],

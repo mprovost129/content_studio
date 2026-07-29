@@ -1,6 +1,6 @@
+import json
 from datetime import timedelta
 from decimal import Decimal
-import json
 
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
@@ -14,6 +14,7 @@ hex_color_validator = RegexValidator(
     regex=r"^#[0-9A-Fa-f]{6}$",
     message="Enter a six-digit hex color such as #3776AB.",
 )
+
 
 class EmailProvider(models.TextChoices):
     NONE = "none", "Not connected"
@@ -29,6 +30,7 @@ class ProviderSyncStatus(models.TextChoices):
     SYNCED = "synced", "Synced"
     NEEDS_REVIEW = "needs_review", "Needs review"
     ERROR = "error", "Error"
+
 
 class TimestampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
@@ -145,7 +147,11 @@ class Lesson(TimestampedModel):
         max_length=20, choices=Difficulty.choices, default=Difficulty.BEGINNER
     )
     category = models.ForeignKey(
-        Category, on_delete=models.SET_NULL, null=True, blank=True, related_name="lessons"
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lessons",
     )
     tags = models.ManyToManyField(Tag, blank=True, related_name="lessons")
     series = models.ForeignKey(
@@ -262,10 +268,41 @@ class Lesson(TimestampedModel):
             ("objective", "Learning objective", bool(self.learning_objective)),
             ("takeaway", "Beginner takeaway", bool(self.beginner_takeaway)),
             ("content", "Content blocks", self.blocks.exists() if self.pk else False),
-            ("code", "Code example", self.blocks.filter(block_type=LessonBlock.BlockType.CODE).exists() if self.pk else False),
-            ("output", "Expected output", bool(self.expected_output) or (self.blocks.filter(block_type=LessonBlock.BlockType.OUTPUT).exists() if self.pk else False)),
-            ("practice", "Practice prompt or challenge", bool(self.practice_prompt) or (self.blocks.filter(block_type=LessonBlock.BlockType.CHALLENGE).exists() if self.pk else False) or (self.code_challenges.exists() if self.pk else False)),
-            ("quiz", "Structured quiz", self.quiz_questions.exists() if self.pk else False),
+            (
+                "code",
+                "Code example",
+                self.blocks.filter(block_type=LessonBlock.BlockType.CODE).exists()
+                if self.pk
+                else False,
+            ),
+            (
+                "output",
+                "Expected output",
+                bool(self.expected_output)
+                or (
+                    self.blocks.filter(block_type=LessonBlock.BlockType.OUTPUT).exists()
+                    if self.pk
+                    else False
+                ),
+            ),
+            (
+                "practice",
+                "Practice prompt or challenge",
+                bool(self.practice_prompt)
+                or (
+                    self.blocks.filter(
+                        block_type=LessonBlock.BlockType.CHALLENGE
+                    ).exists()
+                    if self.pk
+                    else False
+                )
+                or (self.code_challenges.exists() if self.pk else False),
+            ),
+            (
+                "quiz",
+                "Structured quiz",
+                self.quiz_questions.exists() if self.pk else False,
+            ),
             ("mistake", "Common mistake", bool(self.common_mistake)),
             ("seo", "SEO metadata", bool(self.seo_title and self.seo_description)),
         ]
@@ -324,16 +361,21 @@ class QuizQuestion(TimestampedModel):
         TRUE_FALSE = "true_false", "True / false"
         SHORT_ANSWER = "short_answer", "Short answer"
 
-    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="quiz_questions")
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="quiz_questions"
+    )
     position = models.PositiveSmallIntegerField(
         default=1, validators=[MinValueValidator(1), MaxValueValidator(999)]
     )
     question_type = models.CharField(
-        max_length=30, choices=QuestionType.choices, default=QuestionType.MULTIPLE_CHOICE
+        max_length=30,
+        choices=QuestionType.choices,
+        default=QuestionType.MULTIPLE_CHOICE,
     )
     prompt = models.TextField(help_text="Ask one clear beginner-friendly question.")
     explanation = models.TextField(
-        blank=True, help_text="Explain why the correct answer is correct in plain English."
+        blank=True,
+        help_text="Explain why the correct answer is correct in plain English.",
     )
     is_active = models.BooleanField(default=True)
 
@@ -354,7 +396,9 @@ class QuizQuestion(TimestampedModel):
 
 
 class QuizChoice(TimestampedModel):
-    question = models.ForeignKey(QuizQuestion, on_delete=models.CASCADE, related_name="choices")
+    question = models.ForeignKey(
+        QuizQuestion, on_delete=models.CASCADE, related_name="choices"
+    )
     position = models.PositiveSmallIntegerField(
         default=1, validators=[MinValueValidator(1), MaxValueValidator(999)]
     )
@@ -380,19 +424,25 @@ class CodeChallenge(TimestampedModel):
         CONTAINS_OUTPUT = "contains_output", "Output contains text"
         MANUAL = "manual", "Manual review"
 
-    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="code_challenges")
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="code_challenges"
+    )
     position = models.PositiveSmallIntegerField(
         default=1, validators=[MinValueValidator(1), MaxValueValidator(999)]
     )
     title = models.CharField(max_length=180)
-    prompt = models.TextField(help_text="Describe the task the beginner should complete.")
+    prompt = models.TextField(
+        help_text="Describe the task the beginner should complete."
+    )
     starter_code = models.TextField(blank=True)
     solution_code = models.TextField(blank=True)
     expected_output = models.TextField(blank=True)
     hint_1 = models.CharField(max_length=240, blank=True)
     hint_2 = models.CharField(max_length=240, blank=True)
     validation_mode = models.CharField(
-        max_length=30, choices=ValidationMode.choices, default=ValidationMode.EXACT_OUTPUT
+        max_length=30,
+        choices=ValidationMode.choices,
+        default=ValidationMode.EXACT_OUTPUT,
     )
     is_active = models.BooleanField(default=True)
 
@@ -423,7 +473,9 @@ class CodeChallenge(TimestampedModel):
 
 
 class ChallengeTestCase(TimestampedModel):
-    challenge = models.ForeignKey(CodeChallenge, on_delete=models.CASCADE, related_name="test_cases")
+    challenge = models.ForeignKey(
+        CodeChallenge, on_delete=models.CASCADE, related_name="test_cases"
+    )
     position = models.PositiveSmallIntegerField(
         default=1, validators=[MinValueValidator(1), MaxValueValidator(999)]
     )
@@ -458,7 +510,9 @@ class ChallengeTestCase(TimestampedModel):
 
 
 class ChallengeAttempt(TimestampedModel):
-    challenge = models.ForeignKey(CodeChallenge, on_delete=models.CASCADE, related_name="attempts")
+    challenge = models.ForeignKey(
+        CodeChallenge, on_delete=models.CASCADE, related_name="attempts"
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -490,10 +544,16 @@ class LessonProgress(TimestampedModel):
         COMPLETED = "completed", "Completed"
 
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="lesson_progress"
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="lesson_progress",
     )
-    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="progress_records")
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.IN_PROGRESS)
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="progress_records"
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.IN_PROGRESS
+    )
     started_at = models.DateTimeField(default=timezone.now)
     completed_at = models.DateTimeField(null=True, blank=True)
     last_activity_at = models.DateTimeField(default=timezone.now)
@@ -504,7 +564,9 @@ class LessonProgress(TimestampedModel):
     class Meta:
         ordering = ("-last_activity_at",)
         constraints = [
-            models.UniqueConstraint(fields=("user", "lesson"), name="unique_user_lesson_progress")
+            models.UniqueConstraint(
+                fields=("user", "lesson"), name="unique_user_lesson_progress"
+            )
         ]
 
     def mark_completed(self):
@@ -516,7 +578,11 @@ class LessonProgress(TimestampedModel):
     def percent_complete(self):
         if self.status == self.Status.COMPLETED:
             return 100
-        total_items = max(1, self.quiz_total + self.lesson.code_challenges.filter(is_active=True).count())
+        total_items = max(
+            1,
+            self.quiz_total
+            + self.lesson.code_challenges.filter(is_active=True).count(),
+        )
         completed_items = self.quiz_correct + self.challenges_passed
         return min(95, round(completed_items / total_items * 100))
 
@@ -525,12 +591,18 @@ class LessonProgress(TimestampedModel):
 
 
 class QuizAttempt(TimestampedModel):
-    question = models.ForeignKey(QuizQuestion, on_delete=models.CASCADE, related_name="attempts")
+    question = models.ForeignKey(
+        QuizQuestion, on_delete=models.CASCADE, related_name="attempts"
+    )
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="quiz_attempts"
     )
     selected_choice = models.ForeignKey(
-        QuizChoice, on_delete=models.SET_NULL, null=True, blank=True, related_name="attempts"
+        QuizChoice,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="attempts",
     )
     response_text = models.TextField(blank=True)
     is_correct = models.BooleanField(default=False)
@@ -568,13 +640,17 @@ class LearnerBadgeAward(TimestampedModel):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="badge_awards"
     )
-    badge = models.ForeignKey(LearnerBadge, on_delete=models.CASCADE, related_name="awards")
+    badge = models.ForeignKey(
+        LearnerBadge, on_delete=models.CASCADE, related_name="awards"
+    )
     awarded_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ("-awarded_at",)
         constraints = [
-            models.UniqueConstraint(fields=("user", "badge"), name="unique_user_badge_award")
+            models.UniqueConstraint(
+                fields=("user", "badge"), name="unique_user_badge_award"
+            )
         ]
 
     def __str__(self):
@@ -639,7 +715,9 @@ class GraphicAsset(TimestampedModel):
         ordering = ("output_format", "slide_number", "created_at")
 
     def __str__(self):
-        return f"{self.lesson} - {self.get_output_format_display()} #{self.slide_number}"
+        return (
+            f"{self.lesson} - {self.get_output_format_display()} #{self.slide_number}"
+        )
 
 
 class AIModelPricing(TimestampedModel):
@@ -680,7 +758,11 @@ class AIGeneration(TimestampedModel):
         CHALLENGE = "challenge", "Challenge"
 
     lesson = models.ForeignKey(
-        Lesson, on_delete=models.SET_NULL, null=True, blank=True, related_name="ai_generations"
+        Lesson,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ai_generations",
     )
     purpose = models.CharField(max_length=30, choices=Purpose.choices)
     status = models.CharField(
@@ -719,10 +801,14 @@ class AIGeneration(TimestampedModel):
 
     def calculate_estimated_cost(self):
         million = Decimal("1000000")
-        uncached = max(self.input_tokens - self.cached_input_tokens - self.cache_write_tokens, 0)
+        uncached = max(
+            self.input_tokens - self.cached_input_tokens - self.cache_write_tokens, 0
+        )
         regular_cost = Decimal(uncached) * self.input_price_per_million / million
         cached_cost = (
-            Decimal(self.cached_input_tokens) * self.cached_input_price_per_million / million
+            Decimal(self.cached_input_tokens)
+            * self.cached_input_price_per_million
+            / million
         )
         cache_write_cost = (
             Decimal(self.cache_write_tokens)
@@ -730,7 +816,9 @@ class AIGeneration(TimestampedModel):
             * self.cache_write_multiplier
             / million
         )
-        output_cost = Decimal(self.output_tokens) * self.output_price_per_million / million
+        output_cost = (
+            Decimal(self.output_tokens) * self.output_price_per_million / million
+        )
         return (regular_cost + cached_cost + cache_write_cost + output_cost).quantize(
             Decimal("0.000001")
         )
@@ -750,7 +838,9 @@ class CaptionDraft(TimestampedModel):
         APPROVED = "approved", "Approved"
         ARCHIVED = "archived", "Archived"
 
-    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="captions")
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="captions"
+    )
     platform = models.CharField(max_length=20, choices=Platform.choices)
     content = models.TextField()
     status = models.CharField(
@@ -789,7 +879,9 @@ class ContentPlan(TimestampedModel):
         POSTED = "posted", "Posted"
         SKIPPED = "skipped", "Skipped"
 
-    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="content_plans")
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="content_plans"
+    )
     platform = models.CharField(max_length=20, choices=Platform.choices, db_index=True)
     scheduled_at = models.DateTimeField(db_index=True)
     status = models.CharField(
@@ -866,13 +958,18 @@ class PublishingRecord(TimestampedModel):
         EMAIL = "email", "Email list"
         OTHER = "other", "Other"
 
-    lesson = models.ForeignKey(Lesson, on_delete=models.CASCADE, related_name="publishing_records")
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.CASCADE, related_name="publishing_records"
+    )
     platform = models.CharField(max_length=20, choices=Platform.choices, db_index=True)
     published_at = models.DateTimeField(
         default=timezone.now,
         help_text="When this content was posted or published.",
     )
-    post_url = models.URLField(blank=True, help_text="Direct URL to the published post, page, or email archive.")
+    post_url = models.URLField(
+        blank=True,
+        help_text="Direct URL to the published post, page, or email archive.",
+    )
     caption = models.ForeignKey(
         CaptionDraft,
         on_delete=models.SET_NULL,
@@ -963,14 +1060,19 @@ class NewsletterCampaign(TimestampedModel):
     title = models.CharField(max_length=180)
     subject = models.CharField(max_length=180)
     preview_text = models.CharField(max_length=220, blank=True)
-    body = models.TextField(help_text="Draft email body. Review before sending in your email platform.")
+    body = models.TextField(
+        help_text="Draft email body. Review before sending in your email platform."
+    )
     call_to_action = models.CharField(max_length=180, blank=True)
     cta_url = models.URLField(blank=True)
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True
     )
     target_segment = models.CharField(
-        max_length=30, choices=Segment.choices, default=Segment.ALL_ACTIVE, db_index=True
+        max_length=30,
+        choices=Segment.choices,
+        default=Segment.ALL_ACTIVE,
+        db_index=True,
     )
     saved_segment = models.ForeignKey(
         "SubscriberSegment",
@@ -1086,7 +1188,9 @@ class NewsletterCampaign(TimestampedModel):
         if self.saved_segment_id:
             return self.saved_segment.subscriber_count
         if self.target_segment == self.Segment.ALL_ACTIVE:
-            return NewsletterSubscriber.objects.filter(status=NewsletterSubscriber.Status.ACTIVE).count()
+            return NewsletterSubscriber.objects.filter(
+                status=NewsletterSubscriber.Status.ACTIVE
+            ).count()
         skill_map = {
             self.Segment.BEGINNER: ["new", "beginner"],
             self.Segment.INTERMEDIATE: ["returning", "intermediate"],
@@ -1094,7 +1198,9 @@ class NewsletterCampaign(TimestampedModel):
         }
         levels = skill_map.get(self.target_segment)
         if levels:
-            return NewsletterSubscriber.objects.filter(status=NewsletterSubscriber.Status.ACTIVE, user__skill_level__in=levels).count()
+            return NewsletterSubscriber.objects.filter(
+                status=NewsletterSubscriber.Status.ACTIVE, user__skill_level__in=levels
+            ).count()
         return self.estimated_recipients
 
     def __str__(self):
@@ -1114,7 +1220,9 @@ class NewsletterMetricImport(TimestampedModel):
         on_delete=models.CASCADE,
         related_name="metric_imports",
     )
-    provider = models.CharField(max_length=30, choices=Provider.choices, default=Provider.MANUAL)
+    provider = models.CharField(
+        max_length=30, choices=Provider.choices, default=Provider.MANUAL
+    )
     source_filename = models.CharField(max_length=220, blank=True)
     raw_payload = models.TextField(blank=True)
     normalized_data = models.JSONField(default=dict, blank=True)
@@ -1142,7 +1250,14 @@ class NewsletterMetricImport(TimestampedModel):
         ]
 
     def apply_to_campaign(self, mark_sent=False):
-        fields = ["actual_recipients", "opens", "clicks", "unsubscribes", "bounces", "updated_at"]
+        fields = [
+            "actual_recipients",
+            "opens",
+            "clicks",
+            "unsubscribes",
+            "bounces",
+            "updated_at",
+        ]
         self.campaign.actual_recipients = self.actual_recipients
         self.campaign.opens = self.opens
         self.campaign.clicks = self.clicks
@@ -1363,7 +1478,11 @@ class SubscriberSegment(TimestampedModel):
             base = slugify(self.name)[:135] or "segment"
             candidate = base
             suffix = 2
-            while SubscriberSegment.objects.exclude(pk=self.pk).filter(slug=candidate).exists():
+            while (
+                SubscriberSegment.objects.exclude(pk=self.pk)
+                .filter(slug=candidate)
+                .exists()
+            ):
                 candidate = f"{base}-{suffix}"
                 suffix += 1
             self.slug = candidate
@@ -1375,7 +1494,10 @@ class SubscriberSegment(TimestampedModel):
             queryset = queryset.filter(status=self.status_filter)
         if self.source_filter and self.source_filter != "any":
             queryset = queryset.filter(source=self.source_filter)
-        if self.skill_level_filter and self.skill_level_filter != self.SkillLevelFilter.ANY:
+        if (
+            self.skill_level_filter
+            and self.skill_level_filter != self.SkillLevelFilter.ANY
+        ):
             queryset = queryset.filter(user__skill_level=self.skill_level_filter)
         if self.source_lesson_id:
             queryset = queryset.filter(source_lesson=self.source_lesson)
@@ -1424,19 +1546,30 @@ class LearningResource(TimestampedModel):
     slug = models.SlugField(max_length=230, unique=True, blank=True)
     summary = models.TextField(blank=True)
     resource_type = models.CharField(
-        max_length=30, choices=ResourceType.choices, default=ResourceType.CHEAT_SHEET, db_index=True
+        max_length=30,
+        choices=ResourceType.choices,
+        default=ResourceType.CHEAT_SHEET,
+        db_index=True,
     )
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True
     )
     difficulty = models.CharField(
-        max_length=20, choices=Lesson.Difficulty.choices, default=Lesson.Difficulty.BEGINNER
+        max_length=20,
+        choices=Lesson.Difficulty.choices,
+        default=Lesson.Difficulty.BEGINNER,
     )
     category = models.ForeignKey(
-        Category, on_delete=models.SET_NULL, null=True, blank=True, related_name="learning_resources"
+        Category,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="learning_resources",
     )
     tags = models.ManyToManyField(Tag, blank=True, related_name="learning_resources")
-    related_lessons = models.ManyToManyField(Lesson, blank=True, related_name="learning_resources")
+    related_lessons = models.ManyToManyField(
+        Lesson, blank=True, related_name="learning_resources"
+    )
     featured = models.BooleanField(default=False, db_index=True)
     content = models.TextField(
         blank=True,
@@ -1499,7 +1632,11 @@ class LearningResource(TimestampedModel):
             base = slugify(self.title)[:210] or "resource"
             candidate = base
             suffix = 2
-            while LearningResource.objects.exclude(pk=self.pk).filter(slug=candidate).exists():
+            while (
+                LearningResource.objects.exclude(pk=self.pk)
+                .filter(slug=candidate)
+                .exists()
+            ):
                 candidate = f"{base}-{suffix}"
                 suffix += 1
             self.slug = candidate
@@ -1525,42 +1662,110 @@ class RecommendationTuning(TimestampedModel):
 
     name = models.CharField(max_length=120, default="Default recommendation tuning")
     is_active = models.BooleanField(default=True, db_index=True)
-    lesson_cta_bonus = models.IntegerField(default=20, validators=[MinValueValidator(-100), MaxValueValidator(200)])
-    quiz_cta_bonus = models.IntegerField(default=35, validators=[MinValueValidator(-100), MaxValueValidator(200)])
-    challenge_cta_bonus = models.IntegerField(default=40, validators=[MinValueValidator(-100), MaxValueValidator(200)])
-    pdf_open_bonus = models.IntegerField(default=50, validators=[MinValueValidator(-100), MaxValueValidator(200)])
-    pdf_lead_magnet_bonus = models.IntegerField(default=70, validators=[MinValueValidator(-100), MaxValueValidator(200)])
-    newsletter_cta_bonus = models.IntegerField(default=35, validators=[MinValueValidator(-100), MaxValueValidator(200)])
+    lesson_cta_bonus = models.IntegerField(
+        default=20, validators=[MinValueValidator(-100), MaxValueValidator(200)]
+    )
+    quiz_cta_bonus = models.IntegerField(
+        default=35, validators=[MinValueValidator(-100), MaxValueValidator(200)]
+    )
+    challenge_cta_bonus = models.IntegerField(
+        default=40, validators=[MinValueValidator(-100), MaxValueValidator(200)]
+    )
+    pdf_open_bonus = models.IntegerField(
+        default=50, validators=[MinValueValidator(-100), MaxValueValidator(200)]
+    )
+    pdf_lead_magnet_bonus = models.IntegerField(
+        default=70, validators=[MinValueValidator(-100), MaxValueValidator(200)]
+    )
+    newsletter_cta_bonus = models.IntegerField(
+        default=35, validators=[MinValueValidator(-100), MaxValueValidator(200)]
+    )
 
-    related_lesson_weight = models.IntegerField(default=80, validators=[MinValueValidator(0), MaxValueValidator(200)])
-    category_match_weight = models.IntegerField(default=30, validators=[MinValueValidator(0), MaxValueValidator(150)])
-    difficulty_match_weight = models.IntegerField(default=18, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    topic_overlap_weight = models.IntegerField(default=8, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    topic_overlap_cap = models.IntegerField(default=40, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    active_quiz_weight = models.IntegerField(default=10, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    active_challenge_weight = models.IntegerField(default=12, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    practice_code_weight = models.IntegerField(default=5, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    conversion_weight = models.IntegerField(default=6, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    conversion_cap = models.IntegerField(default=48, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    cta_click_weight = models.IntegerField(default=3, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    cta_click_cap = models.IntegerField(default=24, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    related_lesson_weight = models.IntegerField(
+        default=80, validators=[MinValueValidator(0), MaxValueValidator(200)]
+    )
+    category_match_weight = models.IntegerField(
+        default=30, validators=[MinValueValidator(0), MaxValueValidator(150)]
+    )
+    difficulty_match_weight = models.IntegerField(
+        default=18, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    topic_overlap_weight = models.IntegerField(
+        default=8, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    topic_overlap_cap = models.IntegerField(
+        default=40, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    active_quiz_weight = models.IntegerField(
+        default=10, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    active_challenge_weight = models.IntegerField(
+        default=12, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    practice_code_weight = models.IntegerField(
+        default=5, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    conversion_weight = models.IntegerField(
+        default=6, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    conversion_cap = models.IntegerField(
+        default=48, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    cta_click_weight = models.IntegerField(
+        default=3, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    cta_click_cap = models.IntegerField(
+        default=24, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
 
-    exact_accepted_boost = models.IntegerField(default=60, validators=[MinValueValidator(0), MaxValueValidator(200)])
-    exact_dismissed_penalty = models.IntegerField(default=90, validators=[MinValueValidator(0), MaxValueValidator(250)])
-    ignored_per_show_penalty = models.IntegerField(default=8, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    ignored_penalty_cap = models.IntegerField(default=40, validators=[MinValueValidator(0), MaxValueValidator(200)])
-    similar_accepted_boost = models.IntegerField(default=6, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    similar_accepted_cap = models.IntegerField(default=30, validators=[MinValueValidator(0), MaxValueValidator(200)])
-    similar_dismissed_penalty = models.IntegerField(default=8, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    similar_dismissed_cap = models.IntegerField(default=40, validators=[MinValueValidator(0), MaxValueValidator(200)])
-    similar_ignored_penalty = models.IntegerField(default=3, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    similar_ignored_cap = models.IntegerField(default=18, validators=[MinValueValidator(0), MaxValueValidator(200)])
-    same_lesson_accepted_boost = models.IntegerField(default=5, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    same_lesson_accepted_cap = models.IntegerField(default=20, validators=[MinValueValidator(0), MaxValueValidator(200)])
-    same_lesson_dismissed_penalty = models.IntegerField(default=6, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    same_lesson_dismissed_cap = models.IntegerField(default=24, validators=[MinValueValidator(0), MaxValueValidator(200)])
-    feedback_adjustment_floor = models.IntegerField(default=-120, validators=[MinValueValidator(-500), MaxValueValidator(0)])
-    feedback_adjustment_ceiling = models.IntegerField(default=90, validators=[MinValueValidator(0), MaxValueValidator(500)])
+    exact_accepted_boost = models.IntegerField(
+        default=60, validators=[MinValueValidator(0), MaxValueValidator(200)]
+    )
+    exact_dismissed_penalty = models.IntegerField(
+        default=90, validators=[MinValueValidator(0), MaxValueValidator(250)]
+    )
+    ignored_per_show_penalty = models.IntegerField(
+        default=8, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    ignored_penalty_cap = models.IntegerField(
+        default=40, validators=[MinValueValidator(0), MaxValueValidator(200)]
+    )
+    similar_accepted_boost = models.IntegerField(
+        default=6, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    similar_accepted_cap = models.IntegerField(
+        default=30, validators=[MinValueValidator(0), MaxValueValidator(200)]
+    )
+    similar_dismissed_penalty = models.IntegerField(
+        default=8, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    similar_dismissed_cap = models.IntegerField(
+        default=40, validators=[MinValueValidator(0), MaxValueValidator(200)]
+    )
+    similar_ignored_penalty = models.IntegerField(
+        default=3, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    similar_ignored_cap = models.IntegerField(
+        default=18, validators=[MinValueValidator(0), MaxValueValidator(200)]
+    )
+    same_lesson_accepted_boost = models.IntegerField(
+        default=5, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    same_lesson_accepted_cap = models.IntegerField(
+        default=20, validators=[MinValueValidator(0), MaxValueValidator(200)]
+    )
+    same_lesson_dismissed_penalty = models.IntegerField(
+        default=6, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    same_lesson_dismissed_cap = models.IntegerField(
+        default=24, validators=[MinValueValidator(0), MaxValueValidator(200)]
+    )
+    feedback_adjustment_floor = models.IntegerField(
+        default=-120, validators=[MinValueValidator(-500), MaxValueValidator(0)]
+    )
+    feedback_adjustment_ceiling = models.IntegerField(
+        default=90, validators=[MinValueValidator(0), MaxValueValidator(500)]
+    )
 
     notes = models.TextField(blank=True)
 
@@ -1581,7 +1786,9 @@ class RecommendationTuning(TimestampedModel):
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         if self.is_active:
-            type(self).objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
+            type(self).objects.exclude(pk=self.pk).filter(is_active=True).update(
+                is_active=False
+            )
 
 
 class RecommendationTuningChangeLog(TimestampedModel):
@@ -1674,7 +1881,10 @@ class RecommendationTuningChangeLog(TimestampedModel):
 
     @property
     def is_experiment(self):
-        return bool(self.experiment_label or self.experiment_status != self.ExperimentStatus.NOT_EXPERIMENT)
+        return bool(
+            self.experiment_label
+            or self.experiment_status != self.ExperimentStatus.NOT_EXPERIMENT
+        )
 
     @property
     def experiment_summary(self):
@@ -1701,7 +1911,10 @@ class ResourceCTA(TimestampedModel):
         default=1, validators=[MinValueValidator(1), MaxValueValidator(999)]
     )
     target_type = models.CharField(
-        max_length=30, choices=TargetType.choices, default=TargetType.LESSON, db_index=True
+        max_length=30,
+        choices=TargetType.choices,
+        default=TargetType.LESSON,
+        db_index=True,
     )
     title = models.CharField(max_length=160)
     description = models.TextField(blank=True)
@@ -1736,8 +1949,6 @@ class ResourceCTA(TimestampedModel):
 
     def __str__(self):
         return f"{self.resource}: {self.title}"
-
-
 
 
 class RecommendationTuningExperimentSnapshot(TimestampedModel):
@@ -1778,7 +1989,11 @@ class RecommendationTuningExperimentSnapshot(TimestampedModel):
 
     @property
     def experiment_label(self):
-        return self.change_log.experiment_label or self.change_log.preset_name or self.change_log.get_action_display()
+        return (
+            self.change_log.experiment_label
+            or self.change_log.preset_name
+            or self.change_log.get_action_display()
+        )
 
     def __str__(self):
         return f"{self.experiment_label} · {self.window_days} day snapshot"
@@ -1787,36 +2002,88 @@ class RecommendationTuningExperimentSnapshot(TimestampedModel):
 class ExperimentDecisionTuning(TimestampedModel):
     """Editable thresholds and metric weights for experiment decision recommendations."""
 
-    name = models.CharField(max_length=120, default="Default experiment decision tuning")
+    name = models.CharField(
+        max_length=120, default="Default experiment decision tuning"
+    )
     is_active = models.BooleanField(default=True, db_index=True)
 
-    keep_score_threshold = models.FloatField(default=6.0, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    keep_primary_positive_min = models.PositiveSmallIntegerField(default=2, validators=[MinValueValidator(0), MaxValueValidator(10)])
-    keep_high_confidence_score = models.FloatField(default=12.0, validators=[MinValueValidator(0), MaxValueValidator(200)])
-    rollback_score_threshold = models.FloatField(default=-5.0, validators=[MinValueValidator(-100), MaxValueValidator(0)])
-    rollback_primary_negative_min = models.PositiveSmallIntegerField(default=2, validators=[MinValueValidator(0), MaxValueValidator(10)])
-    rollback_high_confidence_score = models.FloatField(default=-10.0, validators=[MinValueValidator(-200), MaxValueValidator(0)])
-    low_confidence_abs_score = models.FloatField(default=4.0, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    max_metric_change_magnitude = models.FloatField(default=3.0, validators=[MinValueValidator(0.1), MaxValueValidator(100)])
+    keep_score_threshold = models.FloatField(
+        default=6.0, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    keep_primary_positive_min = models.PositiveSmallIntegerField(
+        default=2, validators=[MinValueValidator(0), MaxValueValidator(10)]
+    )
+    keep_high_confidence_score = models.FloatField(
+        default=12.0, validators=[MinValueValidator(0), MaxValueValidator(200)]
+    )
+    rollback_score_threshold = models.FloatField(
+        default=-5.0, validators=[MinValueValidator(-100), MaxValueValidator(0)]
+    )
+    rollback_primary_negative_min = models.PositiveSmallIntegerField(
+        default=2, validators=[MinValueValidator(0), MaxValueValidator(10)]
+    )
+    rollback_high_confidence_score = models.FloatField(
+        default=-10.0, validators=[MinValueValidator(-200), MaxValueValidator(0)]
+    )
+    low_confidence_abs_score = models.FloatField(
+        default=4.0, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    max_metric_change_magnitude = models.FloatField(
+        default=3.0, validators=[MinValueValidator(0.1), MaxValueValidator(100)]
+    )
 
-    social_new_followers_weight = models.FloatField(default=2.0, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    social_engagements_weight = models.FloatField(default=1.4, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    social_reach_weight = models.FloatField(default=0.8, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    social_clicks_weight = models.FloatField(default=1.2, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    resources_pdf_downloads_weight = models.FloatField(default=1.6, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    resources_pdf_unlocks_weight = models.FloatField(default=1.3, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    resources_subscribers_weight = models.FloatField(default=2.0, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    newsletter_clicks_weight = models.FloatField(default=1.7, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    newsletter_open_rate_weight = models.FloatField(default=0.8, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    ctas_cta_clicks_weight = models.FloatField(default=1.8, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    conversions_total_conversions_weight = models.FloatField(default=2.5, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    conversions_lesson_views_weight = models.FloatField(default=1.2, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    conversions_quiz_attempts_weight = models.FloatField(default=1.5, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    conversions_challenge_attempts_weight = models.FloatField(default=1.7, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    conversions_lesson_completions_weight = models.FloatField(default=2.2, validators=[MinValueValidator(-20), MaxValueValidator(20)])
+    social_new_followers_weight = models.FloatField(
+        default=2.0, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    social_engagements_weight = models.FloatField(
+        default=1.4, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    social_reach_weight = models.FloatField(
+        default=0.8, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    social_clicks_weight = models.FloatField(
+        default=1.2, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    resources_pdf_downloads_weight = models.FloatField(
+        default=1.6, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    resources_pdf_unlocks_weight = models.FloatField(
+        default=1.3, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    resources_subscribers_weight = models.FloatField(
+        default=2.0, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    newsletter_clicks_weight = models.FloatField(
+        default=1.7, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    newsletter_open_rate_weight = models.FloatField(
+        default=0.8, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    ctas_cta_clicks_weight = models.FloatField(
+        default=1.8, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    conversions_total_conversions_weight = models.FloatField(
+        default=2.5, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    conversions_lesson_views_weight = models.FloatField(
+        default=1.2, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    conversions_quiz_attempts_weight = models.FloatField(
+        default=1.5, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    conversions_challenge_attempts_weight = models.FloatField(
+        default=1.7, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    conversions_lesson_completions_weight = models.FloatField(
+        default=2.2, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
 
-    newsletter_unsubscribes_penalty_weight = models.FloatField(default=2.0, validators=[MinValueValidator(-20), MaxValueValidator(20)])
-    newsletter_bounces_penalty_weight = models.FloatField(default=1.5, validators=[MinValueValidator(-20), MaxValueValidator(20)])
+    newsletter_unsubscribes_penalty_weight = models.FloatField(
+        default=2.0, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
+    newsletter_bounces_penalty_weight = models.FloatField(
+        default=1.5, validators=[MinValueValidator(-20), MaxValueValidator(20)]
+    )
 
     notes = models.TextField(blank=True)
 
@@ -1833,12 +2100,16 @@ class ExperimentDecisionTuning(TimestampedModel):
         tuning = cls.objects.filter(is_active=True).order_by("pk").first()
         if tuning:
             return tuning
-        return cls.objects.create(name="Default experiment decision tuning", is_active=True)
+        return cls.objects.create(
+            name="Default experiment decision tuning", is_active=True
+        )
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         if self.is_active:
-            type(self).objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
+            type(self).objects.exclude(pk=self.pk).filter(is_active=True).update(
+                is_active=False
+            )
 
     def positive_weight_items(self):
         return {
@@ -1852,11 +2123,20 @@ class ExperimentDecisionTuning(TimestampedModel):
             ("newsletter", "clicks"): self.newsletter_clicks_weight,
             ("newsletter", "open_rate"): self.newsletter_open_rate_weight,
             ("ctas", "cta_clicks"): self.ctas_cta_clicks_weight,
-            ("conversions", "total_conversions"): self.conversions_total_conversions_weight,
+            (
+                "conversions",
+                "total_conversions",
+            ): self.conversions_total_conversions_weight,
             ("conversions", "lesson_views"): self.conversions_lesson_views_weight,
             ("conversions", "quiz_attempts"): self.conversions_quiz_attempts_weight,
-            ("conversions", "challenge_attempts"): self.conversions_challenge_attempts_weight,
-            ("conversions", "lesson_completions"): self.conversions_lesson_completions_weight,
+            (
+                "conversions",
+                "challenge_attempts",
+            ): self.conversions_challenge_attempts_weight,
+            (
+                "conversions",
+                "lesson_completions",
+            ): self.conversions_lesson_completions_weight,
         }
 
     def negative_weight_items(self):
@@ -1956,18 +2236,16 @@ class ExperimentDecisionTuningChangeLog(TimestampedModel):
 
     @property
     def is_experiment(self):
-        return bool(self.experiment_label or self.experiment_status != self.ExperimentStatus.NOT_EXPERIMENT)
+        return bool(
+            self.experiment_label
+            or self.experiment_status != self.ExperimentStatus.NOT_EXPERIMENT
+        )
 
     @property
     def experiment_summary(self):
         if not self.is_experiment:
             return "Not tracked as experiment"
         return f"{self.experiment_label or 'Unnamed experiment'} · {self.get_experiment_status_display()} · {self.get_experiment_outcome_display()}"
-
-
-
-
-
 
 
 class ExperimentDecisionTuningExperimentSnapshot(TimestampedModel):
@@ -2008,12 +2286,16 @@ class ExperimentDecisionTuningExperimentSnapshot(TimestampedModel):
 
     @property
     def experiment_label(self):
-        return self.change_log.experiment_label or self.change_log.preset_name or self.change_log.get_action_display()
+        return (
+            self.change_log.experiment_label
+            or self.change_log.preset_name
+            or self.change_log.get_action_display()
+        )
 
     def __str__(self):
-        return f"{self.experiment_label} · {self.window_days} day decision-rule snapshot"
-
-
+        return (
+            f"{self.experiment_label} · {self.window_days} day decision-rule snapshot"
+        )
 
 
 class ExperimentDecisionTuningSnapshotComparisonReport(TimestampedModel):
@@ -2233,7 +2515,9 @@ class ExperimentDecisionTuningSnapshotComparisonReportTemplate(TimestampedModel)
         }
 
 
-class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback(TimestampedModel):
+class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback(
+    TimestampedModel
+):
     """Staff feedback on saved report-template recommendations.
 
     This creates a lightweight feedback loop so Studio can learn whether a
@@ -2252,7 +2536,9 @@ class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeed
         related_name="recommendation_feedback",
     )
     recommendation_key = models.CharField(max_length=180, db_index=True)
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.SHOWN, db_index=True)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.SHOWN, db_index=True
+    )
     score = models.IntegerField(default=0)
     priority = models.CharField(max_length=20, blank=True)
     reasons = models.JSONField(default=list, blank=True)
@@ -2296,45 +2582,112 @@ class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeed
         return self.status == self.Status.SHOWN and self.times_shown >= 3
 
 
-
 class ReportTemplateRecommendationTuning(TimestampedModel):
     """Editable scoring controls for saved report-template recommendations."""
 
-    name = models.CharField(max_length=120, default="Default report-template recommendation tuning")
+    name = models.CharField(
+        max_length=120, default="Default report-template recommendation tuning"
+    )
     is_active = models.BooleanField(default=True, db_index=True)
-    base_template_score = models.IntegerField(default=25, validators=[MinValueValidator(-100), MaxValueValidator(200)])
-    high_priority_threshold = models.IntegerField(default=80, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    medium_priority_threshold = models.IntegerField(default=55, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    matching_window_weight = models.IntegerField(default=5, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    matching_window_cap = models.IntegerField(default=15, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    unused_template_bonus = models.IntegerField(default=18, validators=[MinValueValidator(-100), MaxValueValidator(200)])
-    keep_decision_weight = models.IntegerField(default=7, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    keep_decision_cap = models.IntegerField(default=20, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    watch_decision_weight = models.IntegerField(default=4, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    watch_decision_cap = models.IntegerField(default=10, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    rollback_decision_penalty = models.IntegerField(default=5, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    rollback_decision_cap = models.IntegerField(default=14, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    underused_family_bonus = models.IntegerField(default=8, validators=[MinValueValidator(-100), MaxValueValidator(200)])
-    focus_area_weight = models.IntegerField(default=2, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    focus_area_cap = models.IntegerField(default=8, validators=[MinValueValidator(0), MaxValueValidator(200)])
-    preset_default_weight = models.IntegerField(default=3, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    preset_default_cap = models.IntegerField(default=7, validators=[MinValueValidator(0), MaxValueValidator(200)])
-    exact_useful_boost = models.IntegerField(default=12, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    exact_useful_cap = models.IntegerField(default=24, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    exact_dismissed_penalty = models.IntegerField(default=18, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    exact_dismissed_cap = models.IntegerField(default=36, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    exact_revisit_boost = models.IntegerField(default=4, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    exact_revisit_cap = models.IntegerField(default=8, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    exact_ignored_penalty = models.IntegerField(default=4, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    exact_ignored_cap = models.IntegerField(default=12, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    similar_useful_boost = models.IntegerField(default=3, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    similar_useful_cap = models.IntegerField(default=10, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    similar_dismissed_penalty = models.IntegerField(default=4, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    similar_dismissed_cap = models.IntegerField(default=14, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    similar_revisit_boost = models.IntegerField(default=2, validators=[MinValueValidator(0), MaxValueValidator(100)])
-    similar_revisit_cap = models.IntegerField(default=6, validators=[MinValueValidator(0), MaxValueValidator(300)])
-    feedback_adjustment_floor = models.IntegerField(default=-40, validators=[MinValueValidator(-500), MaxValueValidator(0)])
-    feedback_adjustment_ceiling = models.IntegerField(default=30, validators=[MinValueValidator(0), MaxValueValidator(500)])
+    base_template_score = models.IntegerField(
+        default=25, validators=[MinValueValidator(-100), MaxValueValidator(200)]
+    )
+    high_priority_threshold = models.IntegerField(
+        default=80, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    medium_priority_threshold = models.IntegerField(
+        default=55, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    matching_window_weight = models.IntegerField(
+        default=5, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    matching_window_cap = models.IntegerField(
+        default=15, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    unused_template_bonus = models.IntegerField(
+        default=18, validators=[MinValueValidator(-100), MaxValueValidator(200)]
+    )
+    keep_decision_weight = models.IntegerField(
+        default=7, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    keep_decision_cap = models.IntegerField(
+        default=20, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    watch_decision_weight = models.IntegerField(
+        default=4, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    watch_decision_cap = models.IntegerField(
+        default=10, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    rollback_decision_penalty = models.IntegerField(
+        default=5, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    rollback_decision_cap = models.IntegerField(
+        default=14, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    underused_family_bonus = models.IntegerField(
+        default=8, validators=[MinValueValidator(-100), MaxValueValidator(200)]
+    )
+    focus_area_weight = models.IntegerField(
+        default=2, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    focus_area_cap = models.IntegerField(
+        default=8, validators=[MinValueValidator(0), MaxValueValidator(200)]
+    )
+    preset_default_weight = models.IntegerField(
+        default=3, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    preset_default_cap = models.IntegerField(
+        default=7, validators=[MinValueValidator(0), MaxValueValidator(200)]
+    )
+    exact_useful_boost = models.IntegerField(
+        default=12, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    exact_useful_cap = models.IntegerField(
+        default=24, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    exact_dismissed_penalty = models.IntegerField(
+        default=18, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    exact_dismissed_cap = models.IntegerField(
+        default=36, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    exact_revisit_boost = models.IntegerField(
+        default=4, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    exact_revisit_cap = models.IntegerField(
+        default=8, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    exact_ignored_penalty = models.IntegerField(
+        default=4, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    exact_ignored_cap = models.IntegerField(
+        default=12, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    similar_useful_boost = models.IntegerField(
+        default=3, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    similar_useful_cap = models.IntegerField(
+        default=10, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    similar_dismissed_penalty = models.IntegerField(
+        default=4, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    similar_dismissed_cap = models.IntegerField(
+        default=14, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    similar_revisit_boost = models.IntegerField(
+        default=2, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    similar_revisit_cap = models.IntegerField(
+        default=6, validators=[MinValueValidator(0), MaxValueValidator(300)]
+    )
+    feedback_adjustment_floor = models.IntegerField(
+        default=-40, validators=[MinValueValidator(-500), MaxValueValidator(0)]
+    )
+    feedback_adjustment_ceiling = models.IntegerField(
+        default=30, validators=[MinValueValidator(0), MaxValueValidator(500)]
+    )
     notes = models.TextField(blank=True)
 
     class Meta:
@@ -2350,12 +2703,16 @@ class ReportTemplateRecommendationTuning(TimestampedModel):
         tuning = cls.objects.filter(is_active=True).order_by("pk").first()
         if tuning:
             return tuning
-        return cls.objects.create(name="Default report-template recommendation tuning", is_active=True)
+        return cls.objects.create(
+            name="Default report-template recommendation tuning", is_active=True
+        )
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         if self.is_active:
-            type(self).objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
+            type(self).objects.exclude(pk=self.pk).filter(is_active=True).update(
+                is_active=False
+            )
 
 
 class ReportTemplateRecommendationTuningChangeLog(TimestampedModel):
@@ -2448,7 +2805,10 @@ class ReportTemplateRecommendationTuningChangeLog(TimestampedModel):
 
     @property
     def is_experiment(self):
-        return bool(self.experiment_label or self.experiment_status != self.ExperimentStatus.NOT_EXPERIMENT)
+        return bool(
+            self.experiment_label
+            or self.experiment_status != self.ExperimentStatus.NOT_EXPERIMENT
+        )
 
 
 class ReportTemplateRecommendationTuningExperimentSnapshot(TimestampedModel):
@@ -2485,7 +2845,9 @@ class ReportTemplateRecommendationTuningExperimentSnapshot(TimestampedModel):
             models.Index(fields=("before_start", "after_end")),
         ]
         verbose_name = "report-template recommendation tuning experiment snapshot"
-        verbose_name_plural = "report-template recommendation tuning experiment snapshots"
+        verbose_name_plural = (
+            "report-template recommendation tuning experiment snapshots"
+        )
 
     @property
     def experiment_label(self):
@@ -2495,37 +2857,79 @@ class ReportTemplateRecommendationTuningExperimentSnapshot(TimestampedModel):
         return f"{self.experiment_label} · {self.window_days} day template-recommendation snapshot"
 
 
-
-
 class ReportTemplateRecommendationTuningDecisionRules(TimestampedModel):
     """Editable keep / rollback / watch rules for report-template recommendation tuning snapshots."""
 
-    name = models.CharField(max_length=140, default="Default template-recommendation decision rules")
+    name = models.CharField(
+        max_length=140, default="Default template-recommendation decision rules"
+    )
     is_active = models.BooleanField(default=True, db_index=True)
 
-    keep_score_threshold = models.FloatField(default=8.0, validators=[MinValueValidator(0), MaxValueValidator(500)])
-    keep_primary_positive_min = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(0), MaxValueValidator(10)])
-    keep_high_confidence_score = models.FloatField(default=18.0, validators=[MinValueValidator(0), MaxValueValidator(1000)])
-    rollback_score_threshold = models.FloatField(default=-7.0, validators=[MinValueValidator(-500), MaxValueValidator(0)])
-    rollback_primary_negative_min = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(0), MaxValueValidator(10)])
-    rollback_high_confidence_score = models.FloatField(default=-16.0, validators=[MinValueValidator(-1000), MaxValueValidator(0)])
-    low_confidence_abs_score = models.FloatField(default=5.0, validators=[MinValueValidator(0), MaxValueValidator(500)])
-    max_metric_change_magnitude = models.FloatField(default=25.0, validators=[MinValueValidator(0.1), MaxValueValidator(500)])
+    keep_score_threshold = models.FloatField(
+        default=8.0, validators=[MinValueValidator(0), MaxValueValidator(500)]
+    )
+    keep_primary_positive_min = models.PositiveSmallIntegerField(
+        default=1, validators=[MinValueValidator(0), MaxValueValidator(10)]
+    )
+    keep_high_confidence_score = models.FloatField(
+        default=18.0, validators=[MinValueValidator(0), MaxValueValidator(1000)]
+    )
+    rollback_score_threshold = models.FloatField(
+        default=-7.0, validators=[MinValueValidator(-500), MaxValueValidator(0)]
+    )
+    rollback_primary_negative_min = models.PositiveSmallIntegerField(
+        default=1, validators=[MinValueValidator(0), MaxValueValidator(10)]
+    )
+    rollback_high_confidence_score = models.FloatField(
+        default=-16.0, validators=[MinValueValidator(-1000), MaxValueValidator(0)]
+    )
+    low_confidence_abs_score = models.FloatField(
+        default=5.0, validators=[MinValueValidator(0), MaxValueValidator(500)]
+    )
+    max_metric_change_magnitude = models.FloatField(
+        default=25.0, validators=[MinValueValidator(0.1), MaxValueValidator(500)]
+    )
 
-    template_usage_reports_created_weight = models.FloatField(default=3.0, validators=[MinValueValidator(-50), MaxValueValidator(50)])
-    saved_reports_reports_created_weight = models.FloatField(default=2.2, validators=[MinValueValidator(-50), MaxValueValidator(50)])
-    saved_reports_snapshots_attached_weight = models.FloatField(default=1.0, validators=[MinValueValidator(-50), MaxValueValidator(50)])
-    saved_reports_presets_attached_weight = models.FloatField(default=0.7, validators=[MinValueValidator(-50), MaxValueValidator(50)])
-    decision_keep_decisions_weight = models.FloatField(default=3.4, validators=[MinValueValidator(-50), MaxValueValidator(50)])
-    decision_watch_decisions_weight = models.FloatField(default=1.2, validators=[MinValueValidator(-50), MaxValueValidator(50)])
-    feedback_useful_weight = models.FloatField(default=4.0, validators=[MinValueValidator(-50), MaxValueValidator(50)])
-    feedback_revisit_weight = models.FloatField(default=1.0, validators=[MinValueValidator(-50), MaxValueValidator(50)])
-    feedback_total_actions_weight = models.FloatField(default=0.8, validators=[MinValueValidator(-50), MaxValueValidator(50)])
+    template_usage_reports_created_weight = models.FloatField(
+        default=3.0, validators=[MinValueValidator(-50), MaxValueValidator(50)]
+    )
+    saved_reports_reports_created_weight = models.FloatField(
+        default=2.2, validators=[MinValueValidator(-50), MaxValueValidator(50)]
+    )
+    saved_reports_snapshots_attached_weight = models.FloatField(
+        default=1.0, validators=[MinValueValidator(-50), MaxValueValidator(50)]
+    )
+    saved_reports_presets_attached_weight = models.FloatField(
+        default=0.7, validators=[MinValueValidator(-50), MaxValueValidator(50)]
+    )
+    decision_keep_decisions_weight = models.FloatField(
+        default=3.4, validators=[MinValueValidator(-50), MaxValueValidator(50)]
+    )
+    decision_watch_decisions_weight = models.FloatField(
+        default=1.2, validators=[MinValueValidator(-50), MaxValueValidator(50)]
+    )
+    feedback_useful_weight = models.FloatField(
+        default=4.0, validators=[MinValueValidator(-50), MaxValueValidator(50)]
+    )
+    feedback_revisit_weight = models.FloatField(
+        default=1.0, validators=[MinValueValidator(-50), MaxValueValidator(50)]
+    )
+    feedback_total_actions_weight = models.FloatField(
+        default=0.8, validators=[MinValueValidator(-50), MaxValueValidator(50)]
+    )
 
-    decision_rollback_decisions_penalty = models.FloatField(default=3.6, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    decision_archived_decisions_penalty = models.FloatField(default=1.0, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    feedback_dismissed_penalty = models.FloatField(default=4.0, validators=[MinValueValidator(0), MaxValueValidator(50)])
-    feedback_ignored_penalty = models.FloatField(default=1.6, validators=[MinValueValidator(0), MaxValueValidator(50)])
+    decision_rollback_decisions_penalty = models.FloatField(
+        default=3.6, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    decision_archived_decisions_penalty = models.FloatField(
+        default=1.0, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    feedback_dismissed_penalty = models.FloatField(
+        default=4.0, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
+    feedback_ignored_penalty = models.FloatField(
+        default=1.6, validators=[MinValueValidator(0), MaxValueValidator(50)]
+    )
 
     notes = models.TextField(blank=True)
 
@@ -2542,32 +2946,72 @@ class ReportTemplateRecommendationTuningDecisionRules(TimestampedModel):
         rules = cls.objects.filter(is_active=True).order_by("pk").first()
         if rules:
             return rules
-        return cls.objects.create(name="Default template-recommendation decision rules", is_active=True)
+        return cls.objects.create(
+            name="Default template-recommendation decision rules", is_active=True
+        )
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         if self.is_active:
-            type(self).objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
+            type(self).objects.exclude(pk=self.pk).filter(is_active=True).update(
+                is_active=False
+            )
 
     def positive_weight_items(self):
         return {
-            ("template_usage", "reports_created"): self.template_usage_reports_created_weight,
-            ("saved_reports", "reports_created"): self.saved_reports_reports_created_weight,
-            ("saved_reports", "snapshots_attached"): self.saved_reports_snapshots_attached_weight,
-            ("saved_reports", "presets_attached"): self.saved_reports_presets_attached_weight,
-            ("decision_outcomes", "keep_decisions"): self.decision_keep_decisions_weight,
-            ("decision_outcomes", "watch_decisions"): self.decision_watch_decisions_weight,
+            (
+                "template_usage",
+                "reports_created",
+            ): self.template_usage_reports_created_weight,
+            (
+                "saved_reports",
+                "reports_created",
+            ): self.saved_reports_reports_created_weight,
+            (
+                "saved_reports",
+                "snapshots_attached",
+            ): self.saved_reports_snapshots_attached_weight,
+            (
+                "saved_reports",
+                "presets_attached",
+            ): self.saved_reports_presets_attached_weight,
+            (
+                "decision_outcomes",
+                "keep_decisions",
+            ): self.decision_keep_decisions_weight,
+            (
+                "decision_outcomes",
+                "watch_decisions",
+            ): self.decision_watch_decisions_weight,
             ("recommendation_feedback", "useful_feedback"): self.feedback_useful_weight,
-            ("recommendation_feedback", "revisit_feedback"): self.feedback_revisit_weight,
-            ("recommendation_feedback", "total_feedback_actions"): self.feedback_total_actions_weight,
+            (
+                "recommendation_feedback",
+                "revisit_feedback",
+            ): self.feedback_revisit_weight,
+            (
+                "recommendation_feedback",
+                "total_feedback_actions",
+            ): self.feedback_total_actions_weight,
         }
 
     def negative_weight_items(self):
         return {
-            ("decision_outcomes", "rollback_decisions"): self.decision_rollback_decisions_penalty,
-            ("decision_outcomes", "archived_decisions"): self.decision_archived_decisions_penalty,
-            ("recommendation_feedback", "dismissed_feedback"): self.feedback_dismissed_penalty,
-            ("recommendation_feedback", "ignored_feedback"): self.feedback_ignored_penalty,
+            (
+                "decision_outcomes",
+                "rollback_decisions",
+            ): self.decision_rollback_decisions_penalty,
+            (
+                "decision_outcomes",
+                "archived_decisions",
+            ): self.decision_archived_decisions_penalty,
+            (
+                "recommendation_feedback",
+                "dismissed_feedback",
+            ): self.feedback_dismissed_penalty,
+            (
+                "recommendation_feedback",
+                "ignored_feedback",
+            ): self.feedback_ignored_penalty,
         }
 
     def threshold_summary(self):
@@ -2673,10 +3117,15 @@ class ReportTemplateRecommendationTuningDecisionRulesChangeLog(TimestampedModel)
 
     @property
     def is_experiment(self):
-        return bool(self.experiment_label or self.experiment_status != self.ExperimentStatus.NOT_EXPERIMENT)
+        return bool(
+            self.experiment_label
+            or self.experiment_status != self.ExperimentStatus.NOT_EXPERIMENT
+        )
 
 
-class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot(TimestampedModel):
+class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot(
+    TimestampedModel
+):
     """Before/after snapshot for report-template recommendation decision-rule experiments."""
 
     change_log = models.ForeignKey(
@@ -2709,8 +3158,12 @@ class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot(Timestam
             models.Index(fields=("change_log", "generated_at")),
             models.Index(fields=("before_start", "after_end")),
         ]
-        verbose_name = "report-template recommendation decision-rule experiment snapshot"
-        verbose_name_plural = "report-template recommendation decision-rule experiment snapshots"
+        verbose_name = (
+            "report-template recommendation decision-rule experiment snapshot"
+        )
+        verbose_name_plural = (
+            "report-template recommendation decision-rule experiment snapshots"
+        )
 
     @property
     def experiment_label(self):
@@ -2718,7 +3171,6 @@ class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot(Timestam
 
     def __str__(self):
         return f"{self.experiment_label} · {self.window_days} day template decision-rule snapshot"
-
 
 
 class ResourceCTARecommendationFeedback(TimestampedModel):
@@ -2733,7 +3185,9 @@ class ResourceCTARecommendationFeedback(TimestampedModel):
         related_name="cta_recommendation_feedback",
     )
     recommendation_key = models.CharField(max_length=120, db_index=True)
-    target_type = models.CharField(max_length=30, choices=ResourceCTA.TargetType.choices)
+    target_type = models.CharField(
+        max_length=30, choices=ResourceCTA.TargetType.choices
+    )
     target_lesson = models.ForeignKey(
         Lesson,
         on_delete=models.SET_NULL,
@@ -2744,7 +3198,9 @@ class ResourceCTARecommendationFeedback(TimestampedModel):
     title = models.CharField(max_length=180)
     score = models.IntegerField(default=0)
     reasons = models.JSONField(default=list, blank=True)
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.SHOWN, db_index=True)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.SHOWN, db_index=True
+    )
     times_shown = models.PositiveIntegerField(default=1)
     first_seen_at = models.DateTimeField(default=timezone.now)
     last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
@@ -2845,7 +3301,6 @@ class ResourceCTAClickEvent(TimestampedModel):
         return f"CTA click · {self.cta.title} · {self.resource}"
 
 
-
 class ResourcePerformanceEvent(TimestampedModel):
     class EventType(models.TextChoices):
         VIEW = "view", "Resource view"
@@ -2857,7 +3312,9 @@ class ResourcePerformanceEvent(TimestampedModel):
         on_delete=models.CASCADE,
         related_name="performance_events",
     )
-    event_type = models.CharField(max_length=20, choices=EventType.choices, db_index=True)
+    event_type = models.CharField(
+        max_length=20, choices=EventType.choices, db_index=True
+    )
     subscriber = models.ForeignKey(
         NewsletterSubscriber,
         on_delete=models.SET_NULL,
@@ -2889,8 +3346,6 @@ class ResourcePerformanceEvent(TimestampedModel):
         return f"{self.get_event_type_display()} · {self.resource}"
 
 
-
-
 class ResourceLessonConversionEvent(TimestampedModel):
     class EventType(models.TextChoices):
         LESSON_VIEW = "lesson_view", "Lesson view"
@@ -2911,7 +3366,9 @@ class ResourceLessonConversionEvent(TimestampedModel):
         blank=True,
         related_name="resource_conversion_events",
     )
-    event_type = models.CharField(max_length=30, choices=EventType.choices, db_index=True)
+    event_type = models.CharField(
+        max_length=30, choices=EventType.choices, db_index=True
+    )
     source_event = models.ForeignKey(
         ResourcePerformanceEvent,
         on_delete=models.SET_NULL,
@@ -2951,7 +3408,9 @@ class ResourceLessonConversionEvent(TimestampedModel):
         help_text="Specific CTA click that received attribution when available.",
     )
     email = models.EmailField(blank=True, db_index=True)
-    attribution_event_type = models.CharField(max_length=20, choices=ResourcePerformanceEvent.EventType.choices, blank=True)
+    attribution_event_type = models.CharField(
+        max_length=20, choices=ResourcePerformanceEvent.EventType.choices, blank=True
+    )
     attribution_source_url = models.CharField(max_length=300, blank=True)
     referrer = models.CharField(max_length=300, blank=True)
     metadata = models.JSONField(default=dict, blank=True)

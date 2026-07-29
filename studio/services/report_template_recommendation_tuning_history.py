@@ -4,21 +4,33 @@ from __future__ import annotations
 
 from typing import Any
 
-from studio.models import ReportTemplateRecommendationTuning, ReportTemplateRecommendationTuningChangeLog
-
+from studio.models import (
+    ReportTemplateRecommendationTuning,
+    ReportTemplateRecommendationTuningChangeLog,
+)
 
 EXCLUDED_FIELDS = {"id", "created_at", "updated_at"}
 
 
 def report_template_tuning_field_names() -> list[str]:
-    return [field.name for field in ReportTemplateRecommendationTuning._meta.fields if field.name not in EXCLUDED_FIELDS]
+    return [
+        field.name
+        for field in ReportTemplateRecommendationTuning._meta.fields
+        if field.name not in EXCLUDED_FIELDS
+    ]
 
 
-def report_template_tuning_snapshot(tuning: ReportTemplateRecommendationTuning) -> dict[str, Any]:
-    return {name: getattr(tuning, name) for name in report_template_tuning_field_names()}
+def report_template_tuning_snapshot(
+    tuning: ReportTemplateRecommendationTuning,
+) -> dict[str, Any]:
+    return {
+        name: getattr(tuning, name) for name in report_template_tuning_field_names()
+    }
 
 
-def build_report_template_tuning_diff(before: dict[str, Any], after: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def build_report_template_tuning_diff(
+    before: dict[str, Any], after: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
     diff: dict[str, dict[str, Any]] = {}
     for key in sorted(set(before.keys()) | set(after.keys())):
         old = before.get(key)
@@ -42,19 +54,25 @@ def create_report_template_tuning_change_log(
 ) -> ReportTemplateRecommendationTuningChangeLog | None:
     after = report_template_tuning_snapshot(tuning)
     diff = build_report_template_tuning_diff(before, after)
-    if not diff and action == ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE:
+    if (
+        not diff
+        and action == ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE
+    ):
         return None
     return ReportTemplateRecommendationTuningChangeLog.objects.create(
         tuning=tuning,
         action=action,
-        changed_by=changed_by if getattr(changed_by, "is_authenticated", False) else None,
+        changed_by=changed_by
+        if getattr(changed_by, "is_authenticated", False)
+        else None,
         reason=reason,
         before=before,
         after=after,
         diff=diff,
         request_path=request_path[:300],
         experiment_label=experiment_label,
-        experiment_status=experiment_status or ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+        experiment_status=experiment_status
+        or ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
         experiment_notes=experiment_notes,
     )
 
@@ -82,6 +100,7 @@ def restore_report_template_tuning_snapshot(
         before=before,
         action=ReportTemplateRecommendationTuningChangeLog.Action.ROLLBACK_RESTORED,
         changed_by=changed_by,
-        reason=reason or f"Restored {snapshot}-change report-template recommendation tuning snapshot from log #{source_log.pk}.",
+        reason=reason
+        or f"Restored {snapshot}-change report-template recommendation tuning snapshot from log #{source_log.pk}.",
         request_path=request_path,
     )

@@ -64,7 +64,11 @@ METRIC_LABELS = {
 }
 
 
-def _change(snapshot: ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot, section: str, metric: str) -> float:
+def _change(
+    snapshot: ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot,
+    section: str,
+    metric: str,
+) -> float:
     values = (snapshot.deltas or {}).get(section, {}).get(metric, {})
     raw = values.get("change")
     try:
@@ -83,14 +87,20 @@ def _metric_note(section: str, metric: str, change: float) -> str:
     return f"{SECTION_LABELS.get(section, section.replace('_', ' ').title())}: {METRIC_LABELS.get(metric, metric.replace('_', ' '))} {_display_change(change)}"
 
 
-def _weighted_row(section: str, metric: str, change: float, weight: float, contribution: float) -> dict[str, object]:
+def _weighted_row(
+    section: str, metric: str, change: float, weight: float, contribution: float
+) -> dict[str, object]:
     return {
         "section": SECTION_LABELS.get(section, section.replace("_", " ").title()),
         "metric": METRIC_LABELS.get(metric, metric.replace("_", " ")),
         "change": round(change, 4),
         "weight": weight,
         "contribution": round(contribution, 4),
-        "direction": "positive" if contribution > 0 else "negative" if contribution < 0 else "neutral",
+        "direction": "positive"
+        if contribution > 0
+        else "negative"
+        if contribution < 0
+        else "neutral",
     }
 
 
@@ -99,7 +109,9 @@ def recommend_report_template_decision_rule_snapshot_decision(
     decision_rules: ReportTemplateRecommendationTuningDecisionRules | None = None,
 ) -> TemplateRecommendationDecisionRuleSnapshotDecision:
     """Return deterministic keep/rollback/watch guidance for a decision-rule threshold experiment snapshot."""
-    decision_rules = decision_rules or ReportTemplateRecommendationTuningDecisionRules.get_active()
+    decision_rules = (
+        decision_rules or ReportTemplateRecommendationTuningDecisionRules.get_active()
+    )
     positives: list[str] = []
     negatives: list[str] = []
     neutral_notes: list[str] = []
@@ -110,47 +122,76 @@ def recommend_report_template_decision_rule_snapshot_decision(
         change = _change(snapshot, section, metric)
         contribution = 0.0
         if change > 0:
-            contribution = min(decision_rules.max_metric_change_magnitude, change) * weight
+            contribution = (
+                min(decision_rules.max_metric_change_magnitude, change) * weight
+            )
             positives.append(_metric_note(section, metric, change))
         elif change < 0:
-            contribution = max(-decision_rules.max_metric_change_magnitude, change) * weight
+            contribution = (
+                max(-decision_rules.max_metric_change_magnitude, change) * weight
+            )
             negatives.append(_metric_note(section, metric, change))
         score += contribution
         if change:
-            weighted_signals.append(_weighted_row(section, metric, change, weight, contribution))
+            weighted_signals.append(
+                _weighted_row(section, metric, change, weight, contribution)
+            )
 
     for (section, metric), weight in decision_rules.negative_weight_items().items():
         change = _change(snapshot, section, metric)
         contribution = 0.0
         if change > 0:
-            contribution = -min(decision_rules.max_metric_change_magnitude, change) * weight
+            contribution = (
+                -min(decision_rules.max_metric_change_magnitude, change) * weight
+            )
             negatives.append(_metric_note(section, metric, change))
         elif change < 0:
-            contribution = min(decision_rules.max_metric_change_magnitude, abs(change)) * weight
+            contribution = (
+                min(decision_rules.max_metric_change_magnitude, abs(change)) * weight
+            )
             positives.append(_metric_note(section, metric, change))
         score += contribution
         if change:
-            weighted_signals.append(_weighted_row(section, metric, change, weight, contribution))
+            weighted_signals.append(
+                _weighted_row(section, metric, change, weight, contribution)
+            )
 
-    weighted_signals.sort(key=lambda item: abs(float(item.get("contribution") or 0)), reverse=True)
+    weighted_signals.sort(
+        key=lambda item: abs(float(item.get("contribution") or 0)), reverse=True
+    )
 
     useful_feedback = _change(snapshot, "recommendation_feedback", "useful_feedback")
-    dismissed_feedback = _change(snapshot, "recommendation_feedback", "dismissed_feedback")
+    dismissed_feedback = _change(
+        snapshot, "recommendation_feedback", "dismissed_feedback"
+    )
     ignored_feedback = _change(snapshot, "recommendation_feedback", "ignored_feedback")
     template_reports = _change(snapshot, "template_usage", "reports_created")
     keep_decisions = _change(snapshot, "decision_outcomes", "keep_decisions")
     rollback_decisions = _change(snapshot, "decision_outcomes", "rollback_decisions")
 
-    primary_positive_count = sum(1 for value in [useful_feedback, template_reports, keep_decisions] if value > 0)
-    primary_negative_count = sum(1 for value in [dismissed_feedback, ignored_feedback, rollback_decisions] if value > 0)
+    primary_positive_count = sum(
+        1 for value in [useful_feedback, template_reports, keep_decisions] if value > 0
+    )
+    primary_negative_count = sum(
+        1
+        for value in [dismissed_feedback, ignored_feedback, rollback_decisions]
+        if value > 0
+    )
 
     if not positives and not negatives:
-        neutral_notes.append("No meaningful before/after movement was detected for the decision-rule experiment yet.")
+        neutral_notes.append(
+            "No meaningful before/after movement was detected for the decision-rule experiment yet."
+        )
 
-    if score >= decision_rules.keep_score_threshold and primary_positive_count >= decision_rules.keep_primary_positive_min:
+    if (
+        score >= decision_rules.keep_score_threshold
+        and primary_positive_count >= decision_rules.keep_primary_positive_min
+    ):
         decision = "keep"
         label = "Keep changes"
-        confidence = "High" if score >= decision_rules.keep_high_confidence_score else "Medium"
+        confidence = (
+            "High" if score >= decision_rules.keep_high_confidence_score else "Medium"
+        )
         recommended_status = ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.KEEP
         recommended_outcome = ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.POSITIVE
         summary = "The after-window suggests the Keep / Rollback / Watch thresholds are supporting better template-report usage, outcomes, or recommendation feedback."
@@ -159,10 +200,17 @@ def recommend_report_template_decision_rule_snapshot_decision(
             "Keep the current threshold profile active for the next template-report review cycle.",
             "Create a longer snapshot after more saved reports are decided to confirm the pattern.",
         ]
-    elif score <= decision_rules.rollback_score_threshold and primary_negative_count >= decision_rules.rollback_primary_negative_min:
+    elif (
+        score <= decision_rules.rollback_score_threshold
+        and primary_negative_count >= decision_rules.rollback_primary_negative_min
+    ):
         decision = "rollback"
         label = "Rollback recommended"
-        confidence = "High" if score <= decision_rules.rollback_high_confidence_score else "Medium"
+        confidence = (
+            "High"
+            if score <= decision_rules.rollback_high_confidence_score
+            else "Medium"
+        )
         recommended_status = ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.ROLLBACK
         recommended_outcome = ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.NEGATIVE
         summary = "The after-window suggests the threshold changes may be producing weaker report decisions or lower-quality template recommendations."
@@ -174,7 +222,9 @@ def recommend_report_template_decision_rule_snapshot_decision(
     else:
         decision = "watch"
         label = "Keep watching"
-        confidence = "Low" if abs(score) < decision_rules.low_confidence_abs_score else "Medium"
+        confidence = (
+            "Low" if abs(score) < decision_rules.low_confidence_abs_score else "Medium"
+        )
         recommended_status = ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.INCONCLUSIVE
         recommended_outcome = ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.INCONCLUSIVE
         summary = "The snapshot does not yet show enough evidence to confidently keep or roll back the decision-rule threshold change."
@@ -218,19 +268,25 @@ def apply_report_template_decision_rule_snapshot_decision_to_change_log(
     if note:
         recommendation_note = f"{recommendation_note}\n\nStaff note: {note}"
     if change_log.experiment_notes:
-        change_log.experiment_notes = f"{change_log.experiment_notes}\n\n{recommendation_note}"
+        change_log.experiment_notes = (
+            f"{change_log.experiment_notes}\n\n{recommendation_note}"
+        )
     else:
         change_log.experiment_notes = recommendation_note
     change_log.experiment_status = recommendation.recommended_status
     change_log.experiment_outcome = recommendation.recommended_outcome
     change_log.outcome_recorded_at = timezone.now()
-    change_log.outcome_recorded_by = user if getattr(user, "is_authenticated", False) else None
-    change_log.save(update_fields=[
-        "experiment_status",
-        "experiment_outcome",
-        "experiment_notes",
-        "outcome_recorded_at",
-        "outcome_recorded_by",
-        "updated_at",
-    ])
+    change_log.outcome_recorded_by = (
+        user if getattr(user, "is_authenticated", False) else None
+    )
+    change_log.save(
+        update_fields=[
+            "experiment_status",
+            "experiment_outcome",
+            "experiment_notes",
+            "outcome_recorded_at",
+            "outcome_recorded_by",
+            "updated_at",
+        ]
+    )
     return change_log

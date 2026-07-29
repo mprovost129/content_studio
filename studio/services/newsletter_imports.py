@@ -3,12 +3,21 @@ import io
 import re
 from dataclasses import dataclass, field
 
-
 METRIC_ALIASES = {
     "actual_recipients": {
-        "actual_recipients", "recipients", "recipient_count", "delivered", "delivered_count",
-        "successful_deliveries", "sent", "total_sent", "emails_sent", "contacts_sent",
-        "audience", "sends", "delivered_emails",
+        "actual_recipients",
+        "recipients",
+        "recipient_count",
+        "delivered",
+        "delivered_count",
+        "successful_deliveries",
+        "sent",
+        "total_sent",
+        "emails_sent",
+        "contacts_sent",
+        "audience",
+        "sends",
+        "delivered_emails",
     },
     "opens": {"opens", "total_opens", "unique_opens", "opened", "open_count"},
     "clicks": {"clicks", "total_clicks", "unique_clicks", "clicked", "click_count"},
@@ -56,9 +65,9 @@ def _parse_int(value):
 
 def _metric_for_label(label):
     normalized = _normalize_key(label)
-    for field, aliases in METRIC_ALIASES.items():
+    for metric_field, aliases in METRIC_ALIASES.items():
         if normalized in aliases:
-            return field
+            return metric_field
     return None
 
 
@@ -82,7 +91,9 @@ def parse_newsletter_metrics(text):
     Supports common Mailchimp/Beehiiv/ConvertKit-style column names without coupling
     the app to any one provider. The caller decides which campaign receives the data.
     """
-    result = NewsletterMetricsParseResult(metrics={field: None for field in METRIC_FIELDS})
+    result = NewsletterMetricsParseResult(
+        metrics={field: None for field in METRIC_FIELDS}
+    )
     text = (text or "").strip()
     if not text:
         result.warnings.append("No import text was provided.")
@@ -90,7 +101,9 @@ def parse_newsletter_metrics(text):
 
     # First try CSV/TSV with headers.
     sample = text[:4096]
-    delimiter = "\t" if "\t" in sample and sample.count("\t") > sample.count(",") else ","
+    delimiter = (
+        "\t" if "\t" in sample and sample.count("\t") > sample.count(",") else ","
+    )
     try:
         reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
         if reader.fieldnames:

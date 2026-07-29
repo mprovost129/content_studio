@@ -1,6 +1,5 @@
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
-from django.core.validators import MaxValueValidator, MinValueValidator
 
 from .models import User
 
@@ -12,7 +11,14 @@ class LearnerRegistrationForm(UserCreationForm):
 
     class Meta:
         model = User
-        fields = ("email", "first_name", "display_name", "skill_level", "password1", "password2")
+        fields = (
+            "email",
+            "first_name",
+            "display_name",
+            "skill_level",
+            "password1",
+            "password2",
+        )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

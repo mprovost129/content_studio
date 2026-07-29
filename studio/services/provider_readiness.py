@@ -85,14 +85,18 @@ def _issue_for(provider: str, sync_status: str, missing_fields: list[str]) -> st
 
 
 def _subscriber_rows() -> Iterable[ProviderReadinessRow]:
-    for subscriber in NewsletterSubscriber.objects.select_related("source_lesson").order_by("email"):
+    for subscriber in NewsletterSubscriber.objects.select_related(
+        "source_lesson"
+    ).order_by("email"):
         missing = []
         if subscriber.external_provider != EmailProvider.NONE:
             if not subscriber.external_contact_id:
                 missing.append("External contact ID")
             if not subscriber.external_list_id:
                 missing.append("External list/audience ID")
-        issue = _issue_for(subscriber.external_provider, subscriber.provider_sync_status, missing)
+        issue = _issue_for(
+            subscriber.external_provider, subscriber.provider_sync_status, missing
+        )
         yield ProviderReadinessRow(
             record_type="subscriber",
             label=subscriber.email,
@@ -108,7 +112,9 @@ def _subscriber_rows() -> Iterable[ProviderReadinessRow]:
             provider_url="",
             last_synced_at=subscriber.provider_last_synced_at,
             notes=subscriber.provider_notes,
-            edit_url=reverse("studio:newsletter-subscriber-update", args=[subscriber.pk]),
+            edit_url=reverse(
+                "studio:newsletter-subscriber-update", args=[subscriber.pk]
+            ),
         )
 
 
@@ -120,7 +126,9 @@ def _segment_rows() -> Iterable[ProviderReadinessRow]:
                 missing.append("External segment/tag ID")
             if not segment.external_audience_id:
                 missing.append("External audience/list ID")
-        issue = _issue_for(segment.external_provider, segment.provider_sync_status, missing)
+        issue = _issue_for(
+            segment.external_provider, segment.provider_sync_status, missing
+        )
         yield ProviderReadinessRow(
             record_type="segment",
             label=segment.name,
@@ -141,14 +149,18 @@ def _segment_rows() -> Iterable[ProviderReadinessRow]:
 
 
 def _campaign_rows() -> Iterable[ProviderReadinessRow]:
-    for campaign in NewsletterCampaign.objects.select_related("lesson", "saved_segment").order_by("-scheduled_at", "title"):
+    for campaign in NewsletterCampaign.objects.select_related(
+        "lesson", "saved_segment"
+    ).order_by("-scheduled_at", "title"):
         missing = []
         if campaign.external_provider != EmailProvider.NONE:
             if not campaign.external_campaign_id:
                 missing.append("External campaign ID")
             if not campaign.external_audience_id:
                 missing.append("External audience/list ID")
-        issue = _issue_for(campaign.external_provider, campaign.provider_sync_status, missing)
+        issue = _issue_for(
+            campaign.external_provider, campaign.provider_sync_status, missing
+        )
         yield ProviderReadinessRow(
             record_type="campaign",
             label=campaign.title,
@@ -174,7 +186,11 @@ def provider_readiness_rows(record_type="", provider="", sync_status="", issue="
         "segment": _segment_rows,
         "campaign": _campaign_rows,
     }
-    selected = [record_type] if record_type in builders else ["subscriber", "segment", "campaign"]
+    selected = (
+        [record_type]
+        if record_type in builders
+        else ["subscriber", "segment", "campaign"]
+    )
     rows = []
     for key in selected:
         rows.extend(builders[key]())
@@ -199,11 +215,15 @@ def provider_readiness_summary(rows=None):
         "error": 0,
     }
     by_type = {key: 0 for key in RECORD_TYPE_LABELS}
-    by_provider = {value: {"label": label, "count": 0} for value, label in EmailProvider.choices}
+    by_provider = {
+        value: {"label": label, "count": 0} for value, label in EmailProvider.choices
+    }
     for row in rows:
         summary[row.issue_key] += 1
         by_type[row.record_type] = by_type.get(row.record_type, 0) + 1
-        by_provider.setdefault(row.provider, {"label": _provider_label(row.provider), "count": 0})["count"] += 1
+        by_provider.setdefault(
+            row.provider, {"label": _provider_label(row.provider), "count": 0}
+        )["count"] += 1
     summary["by_type"] = by_type
     summary["by_provider"] = by_provider
     return summary

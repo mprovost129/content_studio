@@ -37,26 +37,28 @@ from .models import (
     RecommendationTuning,
     RecommendationTuningChangeLog,
     RecommendationTuningExperimentSnapshot,
-    ResourceCTA,
-    ResourceCTAClickEvent,
-    ResourceCTARecommendationFeedback,
-    ResourceLeadMagnetAccess,
-    ResourceLessonConversionEvent,
-    ResourcePerformanceEvent,
     ReportTemplateRecommendationTuning,
     ReportTemplateRecommendationTuningChangeLog,
     ReportTemplateRecommendationTuningDecisionRules,
     ReportTemplateRecommendationTuningDecisionRulesChangeLog,
     ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot,
     ReportTemplateRecommendationTuningExperimentSnapshot,
+    ResourceCTA,
+    ResourceCTAClickEvent,
+    ResourceCTARecommendationFeedback,
+    ResourceLeadMagnetAccess,
+    ResourceLessonConversionEvent,
+    ResourcePerformanceEvent,
     SubscriberSegment,
     Tag,
     WebsiteExport,
 )
 from .services.graphics import _python_logo, generate_graphics
 from .services.openai import generate_caption
+from .services.report_template_recommendations import (
+    build_report_template_recommendations,
+)
 from .services.resource_pdfs import resource_pdf_filename
-from .services.report_template_recommendations import build_report_template_recommendations
 from .services.resource_recommendations import build_resource_cta_recommendations
 from .services.social_carousels import (
     apply_social_carousel_template_to_lesson,
@@ -156,7 +158,9 @@ class SocialCarouselTemplateTests(TestCase):
 
         self.assertEqual(created["blocks"], 5)
         self.assertEqual(lesson.blocks.count(), 6)
-        self.assertTrue(GraphicTemplate.objects.filter(slug="code-output-quiz-carousel").exists())
+        self.assertTrue(
+            GraphicTemplate.objects.filter(slug="code-output-quiz-carousel").exists()
+        )
         lesson.refresh_from_db()
         self.assertEqual(lesson.instagram_status, Lesson.Status.DRAFT)
 
@@ -181,7 +185,9 @@ class OpenAIServiceTests(TestCase):
     def test_caption_records_response_usage_and_cost(self, client_class):
         usage = SimpleNamespace(
             input_tokens=1000,
-            input_tokens_details=SimpleNamespace(cached_tokens=100, cache_write_tokens=0),
+            input_tokens_details=SimpleNamespace(
+                cached_tokens=100, cache_write_tokens=0
+            ),
             output_tokens=200,
             output_tokens_details=SimpleNamespace(reasoning_tokens=20),
         )
@@ -227,6 +233,12 @@ class WebsiteServiceTests(TestCase):
         )
 
     def test_serializes_versioned_website_contract(self):
+        NewsletterCampaign.objects.create(
+            lesson=self.lesson,
+            title="Weekly Python Functions",
+            subject="Practice Python functions",
+            body="Try the lesson and write a reusable function.",
+        )
         payload = serialize_lesson(self.lesson)
 
         self.assertEqual(payload["schema_version"], "1.6")
@@ -234,6 +246,10 @@ class WebsiteServiceTests(TestCase):
         self.assertEqual(payload["lesson"]["blocks"][0]["type"], "code")
         self.assertEqual(payload["lesson"]["reading_minutes"], 1)
         self.assertFalse(payload["lesson"]["playground_enabled"])
+        self.assertEqual(
+            payload["lesson"]["newsletter_campaigns"][0]["title"],
+            "Weekly Python Functions",
+        )
 
     def test_export_revisions_keep_stable_content_hash(self):
         first = create_website_export(self.lesson, self.user)
@@ -284,11 +300,13 @@ class PublicSEOTests(TestCase):
         self.assertContains(response, self.lesson.title, status_code=200)
 
     def test_public_lesson_has_canonical_and_json_ld(self):
-        response = self.client.get(reverse("learn:lesson-detail", args=[self.lesson.slug]))
+        response = self.client.get(
+            reverse("learn:lesson-detail", args=[self.lesson.slug])
+        )
 
         self.assertContains(response, 'rel="canonical"')
-        self.assertContains(response, 'application/ld+json')
-        self.assertContains(response, 'LearningResource')
+        self.assertContains(response, "application/ld+json")
+        self.assertContains(response, "LearningResource")
 
 
 class StudioViewTests(TestCase):
@@ -308,7 +326,7 @@ class StudioViewTests(TestCase):
         response = self.client.get(reverse("studio:dashboard"))
 
         self.assertContains(response, "GETTING STARTED")
-        self.assertContains(response, "1 of 10 setup steps complete")
+        self.assertContains(response, "1 of 12 setup steps complete")
         self.assertContains(response, "Open the complete step-by-step guide")
 
     def test_help_guide_is_private_and_explains_complete_workflow(self):
@@ -338,9 +356,10 @@ class StudioViewTests(TestCase):
         self.assertRedirects(response, lesson.get_absolute_url())
         self.assertEqual(lesson.created_by, self.user)
 
-
     def test_user_can_record_publishing_metrics_and_update_platform_status(self):
-        lesson = Lesson.objects.create(title="Posted Lesson", instagram_status=Lesson.Status.READY)
+        lesson = Lesson.objects.create(
+            title="Posted Lesson", instagram_status=Lesson.Status.READY
+        )
         caption = CaptionDraft.objects.create(
             lesson=lesson,
             platform=CaptionDraft.Platform.INSTAGRAM,
@@ -376,7 +395,6 @@ class StudioViewTests(TestCase):
         self.assertEqual(record.caption_text, "Final Instagram caption")
         self.assertEqual(record.engagement_total, 170)
         self.assertEqual(lesson.instagram_status, Lesson.Status.PUBLISHED)
-
 
     def test_performance_report_groups_posts_by_content_format(self):
         lesson = Lesson.objects.create(title="Report Lesson")
@@ -490,7 +508,6 @@ class StudioViewTests(TestCase):
         self.assertIn("Beginner Mistake", csv_text)
         self.assertIn("9", csv_text)
 
-
     def test_user_can_create_newsletter_campaign_from_lesson(self):
         lesson = Lesson.objects.create(
             title="Python Variables",
@@ -502,7 +519,9 @@ class StudioViewTests(TestCase):
         NewsletterSubscriber.objects.create(email="learner@example.com")
         self.client.force_login(self.user)
 
-        response = self.client.get(reverse("studio:newsletter-campaign-create-for-lesson", args=[lesson.slug]))
+        response = self.client.get(
+            reverse("studio:newsletter-campaign-create-for-lesson", args=[lesson.slug])
+        )
 
         self.assertContains(response, "Weekly Python: Python Variables")
         self.assertContains(response, "Create and print a variable")
@@ -520,7 +539,9 @@ class StudioViewTests(TestCase):
         )
         self.client.force_login(self.user)
 
-        response = self.client.post(reverse("studio:newsletter-campaign-mark-sent", args=[campaign.pk]))
+        response = self.client.post(
+            reverse("studio:newsletter-campaign-mark-sent", args=[campaign.pk])
+        )
 
         campaign.refresh_from_db()
         self.assertRedirects(response, reverse("studio:newsletter-campaign-list"))
@@ -563,7 +584,9 @@ class StudioViewTests(TestCase):
         )
         self.client.force_login(self.user)
 
-        response = self.client.post(reverse("studio:block-move", args=[second.pk, "up"]))
+        response = self.client.post(
+            reverse("studio:block-move", args=[second.pk, "up"])
+        )
 
         first.refresh_from_db()
         second.refresh_from_db()
@@ -643,7 +666,9 @@ class StudioViewTests(TestCase):
         self.client.force_login(self.user)
 
         by_code = self.client.get(reverse("studio:lesson-list"), {"q": "Counter"})
-        by_tag = self.client.get(reverse("studio:lesson-list"), {"q": "Data structures"})
+        by_tag = self.client.get(
+            reverse("studio:lesson-list"), {"q": "Data structures"}
+        )
 
         self.assertContains(by_code, lesson.title)
         self.assertContains(by_tag, lesson.title)
@@ -680,8 +705,10 @@ class StudioViewTests(TestCase):
         self.assertContains(preview, "Private website preview")
         self.assertContains(preview, "application/ld+json")
         self.assertRedirects(export_response, lesson.get_absolute_url())
-        self.assertEqual(json_download["Content-Type"], "application/json; charset=utf-8")
-        self.assertContains(json_download, '"schema_version": "1.5"')
+        self.assertEqual(
+            json_download["Content-Type"], "application/json; charset=utf-8"
+        )
+        self.assertContains(json_download, '"schema_version": "1.6"')
         self.assertEqual(html_download["Content-Type"], "text/html; charset=utf-8")
         self.assertContains(html_download, "Website-ready lesson content.")
 
@@ -709,6 +736,7 @@ class StudioViewTests(TestCase):
         self.assertContains(response, "pyodide-worker.js")
         self.assertContains(response, "playground.js")
 
+
 class NewsletterSubscriberTests(TestCase):
     def test_public_newsletter_signup_creates_active_subscriber(self):
         response = self.client.post(
@@ -726,8 +754,12 @@ class NewsletterSubscriberTests(TestCase):
         self.assertEqual(subscriber.source, NewsletterSubscriber.Source.LEARN_HOME)
 
     def test_staff_can_export_newsletter_subscribers(self):
-        user = get_user_model().objects.create_user(email="staff@example.com", password="testpass", is_staff=True)
-        NewsletterSubscriber.objects.create(email="learner@example.com", first_name="Learner")
+        user = get_user_model().objects.create_user(
+            email="staff@example.com", password="testpass", is_staff=True
+        )
+        NewsletterSubscriber.objects.create(
+            email="learner@example.com", first_name="Learner"
+        )
         self.client.force_login(user)
 
         response = self.client.get(reverse("studio:newsletter-subscriber-export"))
@@ -736,9 +768,12 @@ class NewsletterSubscriberTests(TestCase):
         self.assertIn("text/csv", response["Content-Type"])
         self.assertContains(response, "learner@example.com")
 
+
 class NewsletterMetricImportTests(TestCase):
     def test_staff_can_import_newsletter_campaign_metrics_from_pasted_summary(self):
-        user = get_user_model().objects.create_user(email="staff2@example.com", password="testpass", is_staff=True)
+        user = get_user_model().objects.create_user(
+            email="staff2@example.com", password="testpass", is_staff=True
+        )
         lesson = Lesson.objects.create(title="Python Newsletter Lesson")
         campaign = NewsletterCampaign.objects.create(
             lesson=lesson,
@@ -770,7 +805,9 @@ class NewsletterMetricImportTests(TestCase):
         self.assertEqual(campaign.metric_imports.count(), 1)
 
     def test_staff_can_import_newsletter_campaign_metrics_from_csv(self):
-        user = get_user_model().objects.create_user(email="staff3@example.com", password="testpass", is_staff=True)
+        user = get_user_model().objects.create_user(
+            email="staff3@example.com", password="testpass", is_staff=True
+        )
         campaign = NewsletterCampaign.objects.create(
             title="Standalone Email",
             subject="Python tip",
@@ -797,11 +834,24 @@ class NewsletterMetricImportTests(TestCase):
 
 class SubscriberSegmentTests(TestCase):
     def test_segment_matches_subscribers_by_source_and_status(self):
-        staff = get_user_model().objects.create_user(email="segment-staff@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="segment-staff@example.com", password="testpass", is_staff=True
+        )
         lesson = Lesson.objects.create(title="Segment Lesson")
-        NewsletterSubscriber.objects.create(email="active@example.com", source=NewsletterSubscriber.Source.LESSON, source_lesson=lesson)
-        NewsletterSubscriber.objects.create(email="other@example.com", source=NewsletterSubscriber.Source.LEARN_HOME)
-        NewsletterSubscriber.objects.create(email="unsub@example.com", status=NewsletterSubscriber.Status.UNSUBSCRIBED, source=NewsletterSubscriber.Source.LESSON, source_lesson=lesson)
+        NewsletterSubscriber.objects.create(
+            email="active@example.com",
+            source=NewsletterSubscriber.Source.LESSON,
+            source_lesson=lesson,
+        )
+        NewsletterSubscriber.objects.create(
+            email="other@example.com", source=NewsletterSubscriber.Source.LEARN_HOME
+        )
+        NewsletterSubscriber.objects.create(
+            email="unsub@example.com",
+            status=NewsletterSubscriber.Status.UNSUBSCRIBED,
+            source=NewsletterSubscriber.Source.LESSON,
+            source_lesson=lesson,
+        )
         segment = SubscriberSegment.objects.create(
             name="Active lesson signups",
             source_filter=NewsletterSubscriber.Source.LESSON,
@@ -810,22 +860,30 @@ class SubscriberSegmentTests(TestCase):
         )
 
         self.assertEqual(segment.subscriber_count, 1)
-        self.assertEqual(segment.matching_subscribers().first().email, "active@example.com")
+        self.assertEqual(
+            segment.matching_subscribers().first().email, "active@example.com"
+        )
 
     def test_staff_can_export_segment_subscribers(self):
-        staff = get_user_model().objects.create_user(email="segment-export@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="segment-export@example.com", password="testpass", is_staff=True
+        )
         NewsletterSubscriber.objects.create(email="learner@example.com")
         segment = SubscriberSegment.objects.create(name="All active")
         self.client.force_login(staff)
 
-        response = self.client.get(reverse("studio:subscriber-segment-export", args=[segment.pk]))
+        response = self.client.get(
+            reverse("studio:subscriber-segment-export", args=[segment.pk])
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/csv", response["Content-Type"])
         self.assertContains(response, "learner@example.com")
 
     def test_campaign_can_use_saved_segment_for_estimated_recipients(self):
-        staff = get_user_model().objects.create_user(email="campaign-segment@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="campaign-segment@example.com", password="testpass", is_staff=True
+        )
         NewsletterSubscriber.objects.create(email="one@example.com")
         NewsletterSubscriber.objects.create(email="two@example.com")
         segment = SubscriberSegment.objects.create(name="Active audience")
@@ -846,6 +904,8 @@ class SubscriberSegmentTests(TestCase):
                 "clicks": 0,
                 "unsubscribes": 0,
                 "bounces": 0,
+                "external_provider": EmailProvider.NONE,
+                "provider_sync_status": ProviderSyncStatus.NOT_CONNECTED,
             },
         )
 
@@ -855,10 +915,11 @@ class SubscriberSegmentTests(TestCase):
         self.assertEqual(campaign.estimated_recipients, 2)
 
 
-
 class ProviderSyncReadinessTests(TestCase):
     def test_readiness_report_flags_missing_provider_ids(self):
-        staff = get_user_model().objects.create_user(email="sync-report@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="sync-report@example.com", password="testpass", is_staff=True
+        )
         NewsletterSubscriber.objects.create(
             email="mapped@example.com",
             external_provider=EmailProvider.MAILCHIMP,
@@ -866,7 +927,9 @@ class ProviderSyncReadinessTests(TestCase):
         )
         self.client.force_login(staff)
 
-        response = self.client.get(reverse("studio:provider-sync-readiness"), {"issue": "missing_ids"})
+        response = self.client.get(
+            reverse("studio:provider-sync-readiness"), {"issue": "missing_ids"}
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "mapped@example.com")
@@ -874,7 +937,9 @@ class ProviderSyncReadinessTests(TestCase):
         self.assertContains(response, "External list/audience ID")
 
     def test_readiness_csv_export_includes_campaign_provider_mapping(self):
-        staff = get_user_model().objects.create_user(email="sync-export@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="sync-export@example.com", password="testpass", is_staff=True
+        )
         NewsletterCampaign.objects.create(
             title="Provider test",
             subject="Python practice",
@@ -886,14 +951,16 @@ class ProviderSyncReadinessTests(TestCase):
         )
         self.client.force_login(staff)
 
-        response = self.client.get(reverse("studio:provider-sync-readiness-export"), {"record_type": "campaign"})
+        response = self.client.get(
+            reverse("studio:provider-sync-readiness-export"),
+            {"record_type": "campaign"},
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/csv", response["Content-Type"])
         self.assertContains(response, "Provider test")
         self.assertContains(response, "camp_123")
         self.assertContains(response, "pub_456")
-
 
 
 class LearningResourceTests(TestCase):
@@ -912,7 +979,9 @@ class LearningResourceTests(TestCase):
         self.assertContains(response, "Python List Cheat Sheet")
 
     def test_staff_can_create_resource(self):
-        staff = get_user_model().objects.create_user(email="resource-staff@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="resource-staff@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
 
         response = self.client.post(
@@ -933,7 +1002,9 @@ class LearningResourceTests(TestCase):
         self.assertEqual(resource.created_by, staff)
 
     def test_staff_can_generate_resource_from_idea(self):
-        staff = get_user_model().objects.create_user(email="resource-generator@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="resource-generator@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
 
         response = self.client.post(
@@ -945,7 +1016,9 @@ class LearningResourceTests(TestCase):
             },
         )
 
-        resource = LearningResource.objects.get(title="Calculating a Total Price Cheat Sheet for Python Beginners")
+        resource = LearningResource.objects.get(
+            title="Calculating a Total Price Cheat Sheet for Python Beginners"
+        )
         self.assertRedirects(response, resource.get_absolute_url())
         self.assertEqual(resource.status, LearningResource.Status.DRAFT)
         self.assertEqual(resource.created_by, staff)
@@ -953,7 +1026,11 @@ class LearningResourceTests(TestCase):
         self.assertIn("${total:.2f}", resource.content)
 
     def test_staff_can_generate_common_error_resource_from_idea(self):
-        staff = get_user_model().objects.create_user(email="resource-error-generator@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="resource-error-generator@example.com",
+            password="testpass",
+            is_staff=True,
+        )
         self.client.force_login(staff)
 
         response = self.client.post(
@@ -968,7 +1045,9 @@ class LearningResourceTests(TestCase):
         self.assertEqual(response.status_code, 302)
         resource = LearningResource.objects.get(title="How to Fix NameError in Python")
         self.assertIn("Beginner checklist", resource.content)
-        self.assertEqual(resource.resource_type, LearningResource.ResourceType.COMMON_ERROR)
+        self.assertEqual(
+            resource.resource_type, LearningResource.ResourceType.COMMON_ERROR
+        )
 
     def test_public_pdf_download_for_enabled_resource(self):
         resource = LearningResource.objects.create(
@@ -987,7 +1066,9 @@ print(name)
             pdf_download_enabled=True,
         )
 
-        response = self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
+        response = self.client.get(
+            reverse("learn:resource-pdf", kwargs={"slug": resource.slug})
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
@@ -1004,12 +1085,18 @@ print(name)
             pdf_download_enabled=False,
         )
 
-        response = self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
+        response = self.client.get(
+            reverse("learn:resource-pdf", kwargs={"slug": resource.slug})
+        )
 
         self.assertRedirects(response, resource.public_url)
 
     def test_generated_download_resource_enables_pdf_by_default(self):
-        staff = get_user_model().objects.create_user(email="pdf-resource-generator@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="pdf-resource-generator@example.com",
+            password="testpass",
+            is_staff=True,
+        )
         self.client.force_login(staff)
 
         response = self.client.post(
@@ -1026,7 +1113,6 @@ print(name)
         self.assertTrue(resource.pdf_download_enabled)
         self.assertIn("Print this reference", resource.pdf_footer_note)
 
-
     def test_gated_resource_pdf_requires_email_before_download(self):
         resource = LearningResource.objects.create(
             title="Python Lists PDF Lead Magnet",
@@ -1039,23 +1125,35 @@ print(name)
             pdf_lead_magnet_headline="Get the Python Lists PDF",
         )
 
-        response = self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
-        self.assertRedirects(response, reverse("learn:resource-pdf-gate", kwargs={"slug": resource.slug}))
+        response = self.client.get(
+            reverse("learn:resource-pdf", kwargs={"slug": resource.slug})
+        )
+        self.assertRedirects(
+            response, reverse("learn:resource-pdf-gate", kwargs={"slug": resource.slug})
+        )
 
         unlock = self.client.post(
             reverse("learn:resource-pdf-gate", kwargs={"slug": resource.slug}),
             {"email": "learner@example.com", "first_name": "Learner"},
         )
-        self.assertRedirects(unlock, reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
+        self.assertRedirects(
+            unlock,
+            reverse("learn:resource-pdf", kwargs={"slug": resource.slug}),
+            fetch_redirect_response=False,
+        )
 
         subscriber = NewsletterSubscriber.objects.get(email="learner@example.com")
         self.assertEqual(subscriber.source, NewsletterSubscriber.Source.RESOURCE)
         self.assertEqual(subscriber.source_resource, resource)
 
-        pdf = self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
+        pdf = self.client.get(
+            reverse("learn:resource-pdf", kwargs={"slug": resource.slug})
+        )
         self.assertEqual(pdf.status_code, 200)
         self.assertEqual(pdf["Content-Type"], "application/pdf")
-        access = ResourceLeadMagnetAccess.objects.get(resource=resource, email="learner@example.com")
+        access = ResourceLeadMagnetAccess.objects.get(
+            resource=resource, email="learner@example.com"
+        )
         self.assertEqual(access.download_count, 1)
 
     def test_open_resource_pdf_still_downloads_without_email_gate(self):
@@ -1069,11 +1167,12 @@ print(name)
             pdf_requires_email=False,
         )
 
-        response = self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
+        response = self.client.get(
+            reverse("learn:resource-pdf", kwargs={"slug": resource.slug})
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/pdf")
-
 
     def test_resource_performance_events_track_view_unlock_and_download(self):
         resource = LearningResource.objects.create(
@@ -1086,21 +1185,42 @@ print(name)
             pdf_requires_email=True,
         )
 
-        detail = self.client.get(reverse("learn:resource-detail", kwargs={"slug": resource.slug}))
+        detail = self.client.get(
+            reverse("learn:resource-detail", kwargs={"slug": resource.slug})
+        )
         self.assertEqual(detail.status_code, 200)
-        self.assertEqual(ResourcePerformanceEvent.objects.filter(resource=resource, event_type=ResourcePerformanceEvent.EventType.VIEW).count(), 1)
+        self.assertEqual(
+            ResourcePerformanceEvent.objects.filter(
+                resource=resource, event_type=ResourcePerformanceEvent.EventType.VIEW
+            ).count(),
+            1,
+        )
 
         self.client.post(
             reverse("learn:resource-pdf-gate", kwargs={"slug": resource.slug}),
             {"email": "tracked@example.com", "first_name": "Tracked"},
         )
-        self.assertEqual(ResourcePerformanceEvent.objects.filter(resource=resource, event_type=ResourcePerformanceEvent.EventType.PDF_UNLOCK).count(), 1)
+        self.assertEqual(
+            ResourcePerformanceEvent.objects.filter(
+                resource=resource,
+                event_type=ResourcePerformanceEvent.EventType.PDF_UNLOCK,
+            ).count(),
+            1,
+        )
 
         self.client.get(reverse("learn:resource-pdf", kwargs={"slug": resource.slug}))
-        self.assertEqual(ResourcePerformanceEvent.objects.filter(resource=resource, event_type=ResourcePerformanceEvent.EventType.PDF_DOWNLOAD).count(), 1)
+        self.assertEqual(
+            ResourcePerformanceEvent.objects.filter(
+                resource=resource,
+                event_type=ResourcePerformanceEvent.EventType.PDF_DOWNLOAD,
+            ).count(),
+            1,
+        )
 
     def test_resource_performance_report_export_contains_resource_metrics(self):
-        staff = get_user_model().objects.create_user(email="resource-report@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="resource-report@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         resource = LearningResource.objects.create(
             title="Tracked Variables Resource",
@@ -1109,14 +1229,18 @@ print(name)
             resource_type=LearningResource.ResourceType.CHEAT_SHEET,
             content="Variables store values.",
         )
-        ResourcePerformanceEvent.objects.create(resource=resource, event_type=ResourcePerformanceEvent.EventType.VIEW)
+        ResourcePerformanceEvent.objects.create(
+            resource=resource, event_type=ResourcePerformanceEvent.EventType.VIEW
+        )
 
-        response = self.client.get(reverse("studio:resource-performance-report-export"), {"section": "resources"})
+        response = self.client.get(
+            reverse("studio:resource-performance-report-export"),
+            {"section": "resources"},
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/csv", response["Content-Type"])
         self.assertIn("Tracked Variables Resource", response.content.decode())
-
 
     def test_resource_attribution_tracks_lesson_view_conversion(self):
         resource = LearningResource.objects.create(
@@ -1133,8 +1257,12 @@ print(name)
             website_status=Lesson.Status.PUBLISHED,
         )
 
-        self.client.get(reverse("learn:resource-detail", kwargs={"slug": resource.slug}))
-        response = self.client.get(reverse("learn:lesson-detail", kwargs={"slug": lesson.slug}))
+        self.client.get(
+            reverse("learn:resource-detail", kwargs={"slug": resource.slug})
+        )
+        response = self.client.get(
+            reverse("learn:lesson-detail", kwargs={"slug": lesson.slug})
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
@@ -1147,7 +1275,9 @@ print(name)
         )
 
     def test_resource_conversion_report_export_contains_conversion_metrics(self):
-        staff = get_user_model().objects.create_user(email="conversion-report@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="conversion-report@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         resource = LearningResource.objects.create(
             title="Loops Cheat Sheet",
@@ -1168,12 +1298,14 @@ print(name)
             event_type=ResourceLessonConversionEvent.EventType.LESSON_VIEW,
         )
 
-        response = self.client.get(reverse("studio:resource-conversion-report-export"), {"section": "resources"})
+        response = self.client.get(
+            reverse("studio:resource-conversion-report-export"),
+            {"section": "resources"},
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/csv", response["Content-Type"])
         self.assertIn("Loops Cheat Sheet", response.content.decode())
-
 
     def test_resource_cta_click_tracks_and_attributes_conversion(self):
         resource = LearningResource.objects.create(
@@ -1198,17 +1330,30 @@ print(name)
             target_lesson=lesson,
         )
 
-        response = self.client.get(reverse("learn:resource-cta-click", kwargs={"resource_slug": resource.slug, "pk": cta.pk}))
+        response = self.client.get(
+            reverse(
+                "learn:resource-cta-click",
+                kwargs={"resource_slug": resource.slug, "pk": cta.pk},
+            )
+        )
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(ResourceCTAClickEvent.objects.filter(cta=cta, resource=resource).count(), 1)
+        self.assertEqual(
+            ResourceCTAClickEvent.objects.filter(cta=cta, resource=resource).count(), 1
+        )
 
         self.client.get(reverse("learn:lesson-detail", kwargs={"slug": lesson.slug}))
-        conversion = ResourceLessonConversionEvent.objects.filter(resource=resource, lesson=lesson, cta=cta).first()
+        conversion = ResourceLessonConversionEvent.objects.filter(
+            resource=resource, lesson=lesson, cta=cta
+        ).first()
         self.assertIsNotNone(conversion)
-        self.assertEqual(conversion.event_type, ResourceLessonConversionEvent.EventType.LESSON_VIEW)
+        self.assertEqual(
+            conversion.event_type, ResourceLessonConversionEvent.EventType.LESSON_VIEW
+        )
 
     def test_resource_cta_report_export_contains_cta_metrics(self):
-        staff = get_user_model().objects.create_user(email="cta-report@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="cta-report@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         resource = LearningResource.objects.create(
             title="CTA Report Resource",
@@ -1231,9 +1376,16 @@ print(name)
             button_label="Practice now",
             target_lesson=lesson,
         )
-        ResourceCTAClickEvent.objects.create(resource=resource, cta=cta, target_lesson=lesson, target_url="/learn/example/")
+        ResourceCTAClickEvent.objects.create(
+            resource=resource,
+            cta=cta,
+            target_lesson=lesson,
+            target_url="/learn/example/",
+        )
 
-        response = self.client.get(reverse("studio:resource-cta-report-export"), {"section": "ctas"})
+        response = self.client.get(
+            reverse("studio:resource-cta-report-export"), {"section": "ctas"}
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/csv", response["Content-Type"])
@@ -1242,7 +1394,9 @@ print(name)
 
 class ResourceCTARecommendationTests(TestCase):
     def test_resource_detail_recommends_and_applies_matching_lesson_cta(self):
-        staff = get_user_model().objects.create_user(email="cta-recommend@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="cta-recommend@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         lesson = Lesson.objects.create(
             title="Python Lists for Beginners",
@@ -1263,15 +1417,22 @@ class ResourceCTARecommendationTests(TestCase):
         resource.related_lessons.add(lesson)
 
         recommendations = build_resource_cta_recommendations(resource)
-        self.assertTrue(any(item.key == f"lesson:{lesson.pk}" for item in recommendations))
+        self.assertTrue(
+            any(item.key == f"lesson:{lesson.pk}" for item in recommendations)
+        )
 
         response = self.client.post(
-            reverse("studio:resource-cta-recommendation-apply", kwargs={"slug": resource.slug}),
+            reverse(
+                "studio:resource-cta-recommendation-apply",
+                kwargs={"slug": resource.slug},
+            ),
             {"recommendation_key": f"lesson:{lesson.pk}"},
         )
 
         self.assertRedirects(response, resource.get_absolute_url())
-        cta = ResourceCTA.objects.get(resource=resource, target_type=ResourceCTA.TargetType.LESSON)
+        cta = ResourceCTA.objects.get(
+            resource=resource, target_type=ResourceCTA.TargetType.LESSON
+        )
         self.assertEqual(cta.target_lesson, lesson)
         self.assertIn("Start the matching lesson", cta.title)
 
@@ -1283,8 +1444,12 @@ class ResourceCTARecommendationTests(TestCase):
             website_status=Lesson.Status.PUBLISHED,
             difficulty=Lesson.Difficulty.BEGINNER,
         )
-        question = QuizQuestion.objects.create(lesson=lesson, position=1, prompt="What keyword starts a condition?")
-        QuizChoice.objects.create(question=question, position=1, text="if", is_correct=True)
+        question = QuizQuestion.objects.create(
+            lesson=lesson, position=1, prompt="What keyword starts a condition?"
+        )
+        QuizChoice.objects.create(
+            question=question, position=1, text="if", is_correct=True
+        )
         CodeChallenge.objects.create(
             lesson=lesson,
             position=1,
@@ -1303,14 +1468,17 @@ class ResourceCTARecommendationTests(TestCase):
         )
         resource.related_lessons.add(lesson)
 
-        keys = {item.key for item in build_resource_cta_recommendations(resource, limit=10)}
+        keys = {
+            item.key for item in build_resource_cta_recommendations(resource, limit=10)
+        }
 
         self.assertIn(f"quiz:{lesson.pk}", keys)
         self.assertIn(f"challenge:{lesson.pk}", keys)
 
-
     def test_recommendation_feedback_records_shown_and_dismissed(self):
-        staff = get_user_model().objects.create_user(email="cta-feedback@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="cta-feedback@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         lesson = Lesson.objects.create(
             title="Python Dictionaries",
@@ -1329,22 +1497,35 @@ class ResourceCTARecommendationTests(TestCase):
         )
         resource.related_lessons.add(lesson)
 
-        self.client.get(reverse("studio:resource-detail", kwargs={"slug": resource.slug}))
-        feedback = ResourceCTARecommendationFeedback.objects.get(resource=resource, recommendation_key=f"lesson:{lesson.pk}")
-        self.assertEqual(feedback.status, ResourceCTARecommendationFeedback.Status.SHOWN)
+        self.client.get(
+            reverse("studio:resource-detail", kwargs={"slug": resource.slug})
+        )
+        feedback = ResourceCTARecommendationFeedback.objects.get(
+            resource=resource, recommendation_key=f"lesson:{lesson.pk}"
+        )
+        self.assertEqual(
+            feedback.status, ResourceCTARecommendationFeedback.Status.SHOWN
+        )
 
         response = self.client.post(
-            reverse("studio:resource-cta-recommendation-dismiss", kwargs={"slug": resource.slug}),
+            reverse(
+                "studio:resource-cta-recommendation-dismiss",
+                kwargs={"slug": resource.slug},
+            ),
             {"recommendation_key": f"lesson:{lesson.pk}"},
         )
 
         self.assertRedirects(response, resource.get_absolute_url())
         feedback.refresh_from_db()
-        self.assertEqual(feedback.status, ResourceCTARecommendationFeedback.Status.DISMISSED)
+        self.assertEqual(
+            feedback.status, ResourceCTARecommendationFeedback.Status.DISMISSED
+        )
         self.assertIsNotNone(feedback.dismissed_at)
 
     def test_applying_recommendation_marks_feedback_accepted(self):
-        staff = get_user_model().objects.create_user(email="cta-accepted@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="cta-accepted@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         lesson = Lesson.objects.create(
             title="Python Tuples",
@@ -1364,12 +1545,19 @@ class ResourceCTARecommendationTests(TestCase):
         resource.related_lessons.add(lesson)
 
         self.client.post(
-            reverse("studio:resource-cta-recommendation-apply", kwargs={"slug": resource.slug}),
+            reverse(
+                "studio:resource-cta-recommendation-apply",
+                kwargs={"slug": resource.slug},
+            ),
             {"recommendation_key": f"lesson:{lesson.pk}"},
         )
 
-        feedback = ResourceCTARecommendationFeedback.objects.get(resource=resource, recommendation_key=f"lesson:{lesson.pk}")
-        self.assertEqual(feedback.status, ResourceCTARecommendationFeedback.Status.ACCEPTED)
+        feedback = ResourceCTARecommendationFeedback.objects.get(
+            resource=resource, recommendation_key=f"lesson:{lesson.pk}"
+        )
+        self.assertEqual(
+            feedback.status, ResourceCTARecommendationFeedback.Status.ACCEPTED
+        )
         self.assertIsNotNone(feedback.applied_cta)
 
     def test_exact_feedback_adjusts_recommendation_score(self):
@@ -1389,7 +1577,11 @@ class ResourceCTARecommendationTests(TestCase):
             content="Sets store unique values.",
         )
         resource.related_lessons.add(lesson)
-        initial = next(item for item in build_resource_cta_recommendations(resource, limit=10) if item.key == f"lesson:{lesson.pk}")
+        initial = next(
+            item
+            for item in build_resource_cta_recommendations(resource, limit=10)
+            if item.key == f"lesson:{lesson.pk}"
+        )
         ResourceCTARecommendationFeedback.objects.create(
             resource=resource,
             recommendation_key=f"lesson:{lesson.pk}",
@@ -1401,7 +1593,11 @@ class ResourceCTARecommendationTests(TestCase):
             status=ResourceCTARecommendationFeedback.Status.DISMISSED,
         )
 
-        adjusted = next(item for item in build_resource_cta_recommendations(resource, limit=10) if item.key == f"lesson:{lesson.pk}")
+        adjusted = next(
+            item
+            for item in build_resource_cta_recommendations(resource, limit=10)
+            if item.key == f"lesson:{lesson.pk}"
+        )
 
         self.assertLess(adjusted.feedback_adjustment, 0)
         self.assertLess(adjusted.score, adjusted.base_score)
@@ -1452,12 +1648,17 @@ class ResourceCTARecommendationTests(TestCase):
         )
         target_resource.related_lessons.add(target_lesson)
 
-        recommendation = next(item for item in build_resource_cta_recommendations(target_resource, limit=10) if item.key == f"lesson:{target_lesson.pk}")
+        recommendation = next(
+            item
+            for item in build_resource_cta_recommendations(target_resource, limit=10)
+            if item.key == f"lesson:{target_lesson.pk}"
+        )
 
         self.assertGreater(recommendation.feedback_adjustment, 0)
         self.assertGreater(recommendation.score, recommendation.base_score)
-        self.assertTrue(any("accepted" in note for note in recommendation.ranking_notes))
-
+        self.assertTrue(
+            any("accepted" in note for note in recommendation.ranking_notes)
+        )
 
     def test_recommendation_tuning_changes_cta_bonus(self):
         tuning = RecommendationTuning.get_active()
@@ -1471,7 +1672,11 @@ class ResourceCTARecommendationTests(TestCase):
             website_status=Lesson.Status.PUBLISHED,
             difficulty=Lesson.Difficulty.BEGINNER,
         )
-        QuizQuestion.objects.create(lesson=lesson, prompt="Which value is a Boolean?", explanation="True is a Boolean.")
+        QuizQuestion.objects.create(
+            lesson=lesson,
+            prompt="Which value is a Boolean?",
+            explanation="True is a Boolean.",
+        )
         resource = LearningResource.objects.create(
             title="Boolean Cheat Sheet",
             summary="Boolean reference.",
@@ -1483,13 +1688,19 @@ class ResourceCTARecommendationTests(TestCase):
         resource.related_lessons.add(lesson)
 
         recommendations = build_resource_cta_recommendations(resource, limit=10)
-        lesson_rec = next(item for item in recommendations if item.key == f"lesson:{lesson.pk}")
-        quiz_rec = next(item for item in recommendations if item.key == f"quiz:{lesson.pk}")
+        lesson_rec = next(
+            item for item in recommendations if item.key == f"lesson:{lesson.pk}"
+        )
+        quiz_rec = next(
+            item for item in recommendations if item.key == f"quiz:{lesson.pk}"
+        )
 
         self.assertGreater(quiz_rec.score, lesson_rec.score)
 
     def test_recommendation_tuning_view_updates_active_profile(self):
-        staff = get_user_model().objects.create_user(email="tuning@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="tuning@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = RecommendationTuning.get_active()
         response = self.client.post(
@@ -1546,7 +1757,9 @@ class ResourceCTARecommendationTests(TestCase):
         self.assertIn("challenge_cta_bonus", log.diff)
 
     def test_apply_recommendation_tuning_preset_updates_active_profile(self):
-        staff = get_user_model().objects.create_user(email="preset@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="preset@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = RecommendationTuning.get_active()
         tuning.pdf_lead_magnet_bonus = 10
@@ -1555,7 +1768,10 @@ class ResourceCTARecommendationTests(TestCase):
 
         response = self.client.post(
             reverse("studio:recommendation-tuning-preset-apply"),
-            {"preset_key": "lead_magnet_growth", "next": reverse("studio:recommendation-tuning")},
+            {
+                "preset_key": "lead_magnet_growth",
+                "next": reverse("studio:recommendation-tuning"),
+            },
         )
 
         self.assertRedirects(response, reverse("studio:recommendation-tuning"))
@@ -1564,14 +1780,17 @@ class ResourceCTARecommendationTests(TestCase):
         self.assertEqual(tuning.pdf_lead_magnet_bonus, 95)
         self.assertEqual(tuning.newsletter_cta_bonus, 70)
         log = RecommendationTuningChangeLog.objects.latest("created_at")
-        self.assertEqual(log.action, RecommendationTuningChangeLog.Action.PRESET_APPLIED)
+        self.assertEqual(
+            log.action, RecommendationTuningChangeLog.Action.PRESET_APPLIED
+        )
         self.assertEqual(log.preset_key, "lead_magnet_growth")
         self.assertEqual(log.changed_by, staff)
         self.assertIn("pdf_lead_magnet_bonus", log.diff)
 
-
     def test_recommendation_tuning_history_view_and_export(self):
-        staff = get_user_model().objects.create_user(email="history@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="history@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = RecommendationTuning.get_active()
         RecommendationTuningChangeLog.objects.create(
@@ -1593,8 +1812,12 @@ class ResourceCTARecommendationTests(TestCase):
         self.assertIn("text/csv", export["Content-Type"])
         self.assertContains(export, "lesson_cta_bonus")
 
-    def test_recommendation_tuning_simulation_view_compares_presets_without_saving(self):
-        staff = get_user_model().objects.create_user(email="simulate@example.com", password="testpass", is_staff=True)
+    def test_recommendation_tuning_simulation_view_compares_presets_without_saving(
+        self,
+    ):
+        staff = get_user_model().objects.create_user(
+            email="simulate@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = RecommendationTuning.get_active()
         tuning.name = "Original tuning"
@@ -1621,7 +1844,11 @@ class ResourceCTARecommendationTests(TestCase):
 
         response = self.client.post(
             reverse("studio:recommendation-tuning-simulation"),
-            {"resource": resource.pk, "preset_keys": ["challenge_practice"], "limit": 6},
+            {
+                "resource": resource.pk,
+                "preset_keys": ["challenge_practice"],
+                "limit": 6,
+            },
         )
 
         self.assertEqual(response.status_code, 200)
@@ -1632,7 +1859,9 @@ class ResourceCTARecommendationTests(TestCase):
         self.assertEqual(tuning.challenge_cta_bonus, 5)
 
     def test_recommendation_tuning_rollback_restores_before_snapshot(self):
-        staff = get_user_model().objects.create_user(email="rollback@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="rollback@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = RecommendationTuning.get_active()
         tuning.name = "Experiment"
@@ -1643,8 +1872,18 @@ class ResourceCTARecommendationTests(TestCase):
             tuning=tuning,
             action=RecommendationTuningChangeLog.Action.MANUAL_UPDATE,
             changed_by=staff,
-            before={"name": "Original", "is_active": True, "lesson_cta_bonus": 20, "quiz_cta_bonus": 35},
-            after={"name": "Experiment", "is_active": True, "lesson_cta_bonus": 99, "quiz_cta_bonus": 88},
+            before={
+                "name": "Original",
+                "is_active": True,
+                "lesson_cta_bonus": 20,
+                "quiz_cta_bonus": 35,
+            },
+            after={
+                "name": "Experiment",
+                "is_active": True,
+                "lesson_cta_bonus": 99,
+                "quiz_cta_bonus": 88,
+            },
             diff={"lesson_cta_bonus": {"before": 20, "after": 99}},
             reason="Testing rollback.",
         )
@@ -1660,13 +1899,16 @@ class ResourceCTARecommendationTests(TestCase):
         self.assertEqual(tuning.lesson_cta_bonus, 20)
         self.assertEqual(tuning.quiz_cta_bonus, 35)
         rollback_log = RecommendationTuningChangeLog.objects.latest("created_at")
-        self.assertEqual(rollback_log.action, RecommendationTuningChangeLog.Action.ROLLBACK_RESTORED)
+        self.assertEqual(
+            rollback_log.action, RecommendationTuningChangeLog.Action.ROLLBACK_RESTORED
+        )
         self.assertIn("lesson_cta_bonus", rollback_log.diff)
         self.assertEqual(rollback_log.reason, "Restore original weights.")
 
-
     def test_recommendation_tuning_experiment_outcome_update(self):
-        staff = get_user_model().objects.create_user(email="experiment@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="experiment@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = RecommendationTuning.get_active()
         log = RecommendationTuningChangeLog.objects.create(
@@ -1693,13 +1935,20 @@ class ResourceCTARecommendationTests(TestCase):
 
         self.assertRedirects(response, reverse("studio:recommendation-tuning-history"))
         log.refresh_from_db()
-        self.assertEqual(log.experiment_status, RecommendationTuningChangeLog.ExperimentStatus.KEEP)
-        self.assertEqual(log.experiment_outcome, RecommendationTuningChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertEqual(
+            log.experiment_status, RecommendationTuningChangeLog.ExperimentStatus.KEEP
+        )
+        self.assertEqual(
+            log.experiment_outcome,
+            RecommendationTuningChangeLog.ExperimentOutcome.POSITIVE,
+        )
         self.assertEqual(log.outcome_recorded_by, staff)
         self.assertIsNotNone(log.outcome_recorded_at)
 
     def test_recommendation_tuning_history_filters_experiments(self):
-        staff = get_user_model().objects.create_user(email="experiment-filter@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="experiment-filter@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = RecommendationTuning.get_active()
         RecommendationTuningChangeLog.objects.create(
@@ -1725,18 +1974,26 @@ class ResourceCTARecommendationTests(TestCase):
             experiment_outcome=RecommendationTuningChangeLog.ExperimentOutcome.NEGATIVE,
         )
 
-        response = self.client.get(reverse("studio:recommendation-tuning-history"), {"experiment_status": "running", "experiment_label": "Instagram"})
+        response = self.client.get(
+            reverse("studio:recommendation-tuning-history"),
+            {"experiment_status": "running", "experiment_label": "Instagram"},
+        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "August Instagram growth test")
         self.assertNotContains(response, "Archive test")
 
-        export = self.client.get(reverse("studio:recommendation-tuning-history-export"), {"experiment_outcome": "positive"})
+        export = self.client.get(
+            reverse("studio:recommendation-tuning-history-export"),
+            {"experiment_outcome": "positive"},
+        )
         self.assertEqual(export.status_code, 200)
         self.assertContains(export, "experiment_label")
         self.assertContains(export, "August Instagram growth test")
 
     def test_recommendation_tuning_rollback_review_page(self):
-        staff = get_user_model().objects.create_user(email="rollback-view@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="rollback-view@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = RecommendationTuning.get_active()
         log = RecommendationTuningChangeLog.objects.create(
@@ -1748,14 +2005,17 @@ class ResourceCTARecommendationTests(TestCase):
             diff={"lesson_cta_bonus": {"before": 20, "after": 65}},
         )
 
-        response = self.client.get(reverse("studio:recommendation-tuning-rollback", args=[log.pk]))
+        response = self.client.get(
+            reverse("studio:recommendation-tuning-rollback", args=[log.pk])
+        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Restore before-change snapshot")
         self.assertContains(response, "lesson_cta_bonus")
 
-
     def test_recommendation_tuning_experiment_snapshot_create_and_export(self):
-        staff = get_user_model().objects.create_user(email="snapshot@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="snapshot@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = RecommendationTuning.get_active()
         log = RecommendationTuningChangeLog.objects.create(
@@ -1781,28 +2041,47 @@ class ResourceCTARecommendationTests(TestCase):
         )
 
         response = self.client.post(
-            reverse("studio:recommendation-tuning-experiment-snapshot-create", args=[log.pk]),
+            reverse(
+                "studio:recommendation-tuning-experiment-snapshot-create", args=[log.pk]
+            ),
             {"window_days": 14, "notes": "Compare after launch."},
         )
 
         snapshot = RecommendationTuningExperimentSnapshot.objects.get(change_log=log)
-        self.assertRedirects(response, reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+        )
         self.assertEqual(snapshot.window_days, 14)
         self.assertEqual(snapshot.after_metrics["social"]["new_followers"], 3)
         self.assertEqual(snapshot.deltas["social"]["new_followers"]["change"], 3)
 
-        detail = self.client.get(reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        detail = self.client.get(
+            reverse(
+                "studio:recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            )
+        )
         self.assertEqual(detail.status_code, 200)
         self.assertContains(detail, "Social publishing")
 
-        export = self.client.get(reverse("studio:recommendation-tuning-experiment-snapshot-export", args=[snapshot.pk]))
+        export = self.client.get(
+            reverse(
+                "studio:recommendation-tuning-experiment-snapshot-export",
+                args=[snapshot.pk],
+            )
+        )
         self.assertEqual(export.status_code, 200)
         self.assertContains(export, "experiment_label")
         self.assertContains(export, "New followers")
 
-
     def test_experiment_snapshot_recommends_keep_and_can_record_decision(self):
-        staff = get_user_model().objects.create_user(email="decision@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="decision@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = RecommendationTuning.get_active()
         log = RecommendationTuningChangeLog.objects.create(
@@ -1826,33 +2105,72 @@ class ResourceCTARecommendationTests(TestCase):
             before_metrics={},
             after_metrics={},
             deltas={
-                "social": {"new_followers": {"before": 1, "after": 5, "change": 4, "pct": 400}},
-                "resources": {"pdf_downloads": {"before": 2, "after": 8, "change": 6, "pct": 300}},
-                "newsletter": {"clicks": {"before": 1, "after": 3, "change": 2, "pct": 200}},
-                "ctas": {"cta_clicks": {"before": 1, "after": 7, "change": 6, "pct": 600}},
-                "conversions": {"total_conversions": {"before": 1, "after": 6, "change": 5, "pct": 500}},
+                "social": {
+                    "new_followers": {"before": 1, "after": 5, "change": 4, "pct": 400}
+                },
+                "resources": {
+                    "pdf_downloads": {"before": 2, "after": 8, "change": 6, "pct": 300}
+                },
+                "newsletter": {
+                    "clicks": {"before": 1, "after": 3, "change": 2, "pct": 200}
+                },
+                "ctas": {
+                    "cta_clicks": {"before": 1, "after": 7, "change": 6, "pct": 600}
+                },
+                "conversions": {
+                    "total_conversions": {
+                        "before": 1,
+                        "after": 6,
+                        "change": 5,
+                        "pct": 500,
+                    }
+                },
             },
             summary={},
             generated_by=staff,
         )
 
-        detail = self.client.get(reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        detail = self.client.get(
+            reverse(
+                "studio:recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            )
+        )
         self.assertEqual(detail.status_code, 200)
         self.assertContains(detail, "DECISION RECOMMENDATION")
         self.assertContains(detail, "Keep changes")
 
         response = self.client.post(
-            reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]),
-            {"action": "apply_decision_recommendation", "decision_note": "Looks strong."},
+            reverse(
+                "studio:recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+            {
+                "action": "apply_decision_recommendation",
+                "decision_note": "Looks strong.",
+            },
         )
-        self.assertRedirects(response, reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+        )
         log.refresh_from_db()
-        self.assertEqual(log.experiment_status, RecommendationTuningChangeLog.ExperimentStatus.KEEP)
-        self.assertEqual(log.experiment_outcome, RecommendationTuningChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertEqual(
+            log.experiment_status, RecommendationTuningChangeLog.ExperimentStatus.KEEP
+        )
+        self.assertEqual(
+            log.experiment_outcome,
+            RecommendationTuningChangeLog.ExperimentOutcome.POSITIVE,
+        )
         self.assertIn("Decision recommendation from snapshot", log.experiment_notes)
 
     def test_experiment_snapshot_recommends_rollback_for_declines(self):
-        staff = get_user_model().objects.create_user(email="rollback-decision@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="rollback-decision@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = RecommendationTuning.get_active()
         log = RecommendationTuningChangeLog.objects.create(
@@ -1876,56 +2194,86 @@ class ResourceCTARecommendationTests(TestCase):
             before_metrics={},
             after_metrics={},
             deltas={
-                "social": {"new_followers": {"before": 8, "after": 2, "change": -6, "pct": -75}},
-                "resources": {"pdf_downloads": {"before": 9, "after": 2, "change": -7, "pct": -77.78}},
-                "newsletter": {"clicks": {"before": 5, "after": 1, "change": -4, "pct": -80}, "unsubscribes": {"before": 0, "after": 3, "change": 3, "pct": None}},
-                "ctas": {"cta_clicks": {"before": 12, "after": 3, "change": -9, "pct": -75}},
-                "conversions": {"total_conversions": {"before": 10, "after": 2, "change": -8, "pct": -80}},
+                "social": {
+                    "new_followers": {"before": 8, "after": 2, "change": -6, "pct": -75}
+                },
+                "resources": {
+                    "pdf_downloads": {
+                        "before": 9,
+                        "after": 2,
+                        "change": -7,
+                        "pct": -77.78,
+                    }
+                },
+                "newsletter": {
+                    "clicks": {"before": 5, "after": 1, "change": -4, "pct": -80},
+                    "unsubscribes": {"before": 0, "after": 3, "change": 3, "pct": None},
+                },
+                "ctas": {
+                    "cta_clicks": {"before": 12, "after": 3, "change": -9, "pct": -75}
+                },
+                "conversions": {
+                    "total_conversions": {
+                        "before": 10,
+                        "after": 2,
+                        "change": -8,
+                        "pct": -80,
+                    }
+                },
             },
             summary={},
             generated_by=staff,
         )
 
-        detail = self.client.get(reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        detail = self.client.get(
+            reverse(
+                "studio:recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            )
+        )
         self.assertEqual(detail.status_code, 200)
         self.assertContains(detail, "Rollback recommended")
 
-
     def test_experiment_decision_tuning_page_updates_thresholds(self):
-        staff = get_user_model().objects.create_user(email="decision-rules@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="decision-rules@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         tuning = ExperimentDecisionTuning.get_active()
 
-        response = self.client.post(reverse("studio:experiment-decision-tuning"), {
-            "name": tuning.name,
-            "is_active": "on",
-            "keep_score_threshold": "8",
-            "keep_primary_positive_min": "3",
-            "keep_high_confidence_score": "14",
-            "rollback_score_threshold": "-6",
-            "rollback_primary_negative_min": "2",
-            "rollback_high_confidence_score": "-12",
-            "low_confidence_abs_score": "5",
-            "max_metric_change_magnitude": "4",
-            "social_new_followers_weight": "3",
-            "social_engagements_weight": "1.4",
-            "social_reach_weight": "0.8",
-            "social_clicks_weight": "1.2",
-            "resources_pdf_downloads_weight": "1.6",
-            "resources_pdf_unlocks_weight": "1.3",
-            "resources_subscribers_weight": "2",
-            "newsletter_clicks_weight": "1.7",
-            "newsletter_open_rate_weight": "0.8",
-            "ctas_cta_clicks_weight": "1.8",
-            "conversions_total_conversions_weight": "2.5",
-            "conversions_lesson_views_weight": "1.2",
-            "conversions_quiz_attempts_weight": "1.5",
-            "conversions_challenge_attempts_weight": "1.7",
-            "conversions_lesson_completions_weight": "2.2",
-            "newsletter_unsubscribes_penalty_weight": "2",
-            "newsletter_bounces_penalty_weight": "1.5",
-            "notes": "Require stronger signal before keep decisions.",
-        })
+        response = self.client.post(
+            reverse("studio:experiment-decision-tuning"),
+            {
+                "name": tuning.name,
+                "is_active": "on",
+                "keep_score_threshold": "8",
+                "keep_primary_positive_min": "3",
+                "keep_high_confidence_score": "14",
+                "rollback_score_threshold": "-6",
+                "rollback_primary_negative_min": "2",
+                "rollback_high_confidence_score": "-12",
+                "low_confidence_abs_score": "5",
+                "max_metric_change_magnitude": "4",
+                "social_new_followers_weight": "3",
+                "social_engagements_weight": "1.4",
+                "social_reach_weight": "0.8",
+                "social_clicks_weight": "1.2",
+                "resources_pdf_downloads_weight": "1.6",
+                "resources_pdf_unlocks_weight": "1.3",
+                "resources_subscribers_weight": "2",
+                "newsletter_clicks_weight": "1.7",
+                "newsletter_open_rate_weight": "0.8",
+                "ctas_cta_clicks_weight": "1.8",
+                "conversions_total_conversions_weight": "2.5",
+                "conversions_lesson_views_weight": "1.2",
+                "conversions_quiz_attempts_weight": "1.5",
+                "conversions_challenge_attempts_weight": "1.7",
+                "conversions_lesson_completions_weight": "2.2",
+                "newsletter_unsubscribes_penalty_weight": "2",
+                "newsletter_bounces_penalty_weight": "1.5",
+                "notes": "Require stronger signal before keep decisions.",
+            },
+        )
 
         self.assertRedirects(response, reverse("studio:experiment-decision-tuning"))
         tuning.refresh_from_db()
@@ -1934,7 +2282,9 @@ class ResourceCTARecommendationTests(TestCase):
         self.assertEqual(tuning.social_new_followers_weight, 3.0)
 
     def test_experiment_decision_tuning_changes_recommendation_threshold(self):
-        staff = get_user_model().objects.create_user(email="strict-rules@example.com", password="testpass", is_staff=True)
+        staff = get_user_model().objects.create_user(
+            email="strict-rules@example.com", password="testpass", is_staff=True
+        )
         self.client.force_login(staff)
         decision_tuning = ExperimentDecisionTuning.get_active()
         decision_tuning.keep_score_threshold = 50
@@ -1967,11 +2317,15 @@ class ResourceCTARecommendationTests(TestCase):
             generated_by=staff,
         )
 
-        detail = self.client.get(reverse("studio:recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        detail = self.client.get(
+            reverse(
+                "studio:recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            )
+        )
         self.assertEqual(detail.status_code, 200)
         self.assertContains(detail, "Inconclusive")
         self.assertContains(detail, "Decision rules")
-
 
 
 class ExperimentDecisionTuningHistoryTests(TestCase):
@@ -1981,6 +2335,7 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             password="testpass",
             is_staff=True,
         )
+        self.user = self.staff
         self.client.force_login(self.staff)
 
     def _post_payload(self, **overrides):
@@ -2026,7 +2381,9 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
         )
         self.assertRedirects(response, reverse("studio:experiment-decision-tuning"))
         log = ExperimentDecisionTuningChangeLog.objects.latest("created_at")
-        self.assertEqual(log.action, ExperimentDecisionTuningChangeLog.Action.MANUAL_UPDATE)
+        self.assertEqual(
+            log.action, ExperimentDecisionTuningChangeLog.Action.MANUAL_UPDATE
+        )
         self.assertIn("keep_score_threshold", log.diff)
         self.assertEqual(log.changed_by, self.staff)
 
@@ -2043,13 +2400,19 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
         )
         response = self.client.get(reverse("studio:experiment-decision-tuning-history"))
         self.assertContains(response, "Decision-rule audit log")
-        export = self.client.get(reverse("studio:experiment-decision-tuning-history-export"))
+        export = self.client.get(
+            reverse("studio:experiment-decision-tuning-history-export")
+        )
         self.assertContains(export, "keep_score_threshold")
         self.assertEqual(export["Content-Type"], "text/csv")
 
     def test_decision_rule_rollback_restores_snapshot(self):
         tuning = ExperimentDecisionTuning.get_active()
-        before = {field.name: getattr(tuning, field.name) for field in ExperimentDecisionTuning._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        before = {
+            field.name: getattr(tuning, field.name)
+            for field in ExperimentDecisionTuning._meta.fields
+            if field.name not in {"id", "created_at", "updated_at"}
+        }
         after = before.copy()
         before["keep_score_threshold"] = 4.0
         after["keep_score_threshold"] = 9.0
@@ -2065,24 +2428,32 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             reverse("studio:experiment-decision-tuning-rollback", args=[log.pk]),
             {"snapshot": "before", "rollback_reason": "Undo test"},
         )
-        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-history"))
+        self.assertRedirects(
+            response, reverse("studio:experiment-decision-tuning-history")
+        )
         tuning.refresh_from_db()
         self.assertEqual(tuning.keep_score_threshold, 4.0)
         rollback = ExperimentDecisionTuningChangeLog.objects.latest("created_at")
-        self.assertEqual(rollback.action, ExperimentDecisionTuningChangeLog.Action.ROLLBACK_RESTORED)
-
+        self.assertEqual(
+            rollback.action, ExperimentDecisionTuningChangeLog.Action.ROLLBACK_RESTORED
+        )
 
     def test_decision_rule_preset_application_creates_audit_log(self):
         response = self.client.post(
             reverse("studio:experiment-decision-tuning-preset-apply"),
-            {"preset_key": "aggressive_growth", "change_reason": "Testing preset apply"},
+            {
+                "preset_key": "aggressive_growth",
+                "change_reason": "Testing preset apply",
+            },
         )
         self.assertRedirects(response, reverse("studio:experiment-decision-tuning"))
         tuning = ExperimentDecisionTuning.get_active()
         self.assertEqual(tuning.name, "Aggressive Growth")
         self.assertEqual(tuning.keep_primary_positive_min, 1)
         log = ExperimentDecisionTuningChangeLog.objects.latest("created_at")
-        self.assertEqual(log.action, ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED)
+        self.assertEqual(
+            log.action, ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED
+        )
         self.assertIn("social_new_followers_weight", log.diff)
 
     def test_decision_rule_simulation_does_not_change_active_rules(self):
@@ -2108,14 +2479,20 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             after_end=now,
             deltas={
                 "social": {"new_followers": {"change": 4}, "clicks": {"change": 2}},
-                "resources": {"pdf_downloads": {"change": 3}, "subscribers": {"change": 2}},
+                "resources": {
+                    "pdf_downloads": {"change": 3},
+                    "subscribers": {"change": 2},
+                },
                 "conversions": {"total_conversions": {"change": 5}},
             },
             generated_by=self.staff,
         )
         response = self.client.post(
             reverse("studio:experiment-decision-tuning-simulation"),
-            {"snapshot": snapshot.pk, "preset_keys": ["aggressive_growth", "conservative_quality"]},
+            {
+                "snapshot": snapshot.pk,
+                "preset_keys": ["aggressive_growth", "conservative_quality"],
+            },
         )
         self.assertContains(response, "Aggressive Growth")
         self.assertContains(response, "Conservative Quality")
@@ -2135,7 +2512,10 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
         self.assertRedirects(response, reverse("studio:experiment-decision-tuning"))
         log = ExperimentDecisionTuningChangeLog.objects.latest("created_at")
         self.assertEqual(log.experiment_label, "August decision rule test")
-        self.assertEqual(log.experiment_status, ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING)
+        self.assertEqual(
+            log.experiment_status,
+            ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING,
+        )
         self.assertTrue(log.is_experiment)
 
     def test_decision_rule_preset_can_start_named_experiment(self):
@@ -2150,11 +2530,16 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
         )
         self.assertRedirects(response, reverse("studio:experiment-decision-tuning"))
         log = ExperimentDecisionTuningChangeLog.objects.latest("created_at")
-        self.assertEqual(log.action, ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED)
+        self.assertEqual(
+            log.action, ExperimentDecisionTuningChangeLog.Action.PRESET_APPLIED
+        )
         self.assertEqual(log.preset_key, "lead_magnet_focus")
         self.assertEqual(log.preset_name, "Lead Magnet Focus")
         self.assertEqual(log.experiment_label, "Lead magnet decision test")
-        self.assertEqual(log.experiment_status, ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING)
+        self.assertEqual(
+            log.experiment_status,
+            ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING,
+        )
 
     def test_decision_rule_experiment_outcome_page_updates_log(self):
         tuning = ExperimentDecisionTuning.get_active()
@@ -2176,10 +2561,18 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
                 "experiment_notes": "Keep this preset. Snapshot performance improved.",
             },
         )
-        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-history"))
+        self.assertRedirects(
+            response, reverse("studio:experiment-decision-tuning-history")
+        )
         log.refresh_from_db()
-        self.assertEqual(log.experiment_status, ExperimentDecisionTuningChangeLog.ExperimentStatus.KEEP)
-        self.assertEqual(log.experiment_outcome, ExperimentDecisionTuningChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertEqual(
+            log.experiment_status,
+            ExperimentDecisionTuningChangeLog.ExperimentStatus.KEEP,
+        )
+        self.assertEqual(
+            log.experiment_outcome,
+            ExperimentDecisionTuningChangeLog.ExperimentOutcome.POSITIVE,
+        )
         self.assertEqual(log.outcome_recorded_by, self.staff)
         self.assertIsNotNone(log.outcome_recorded_at)
 
@@ -2195,13 +2588,18 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             experiment_status=ExperimentDecisionTuningChangeLog.ExperimentStatus.RUNNING,
             experiment_outcome=ExperimentDecisionTuningChangeLog.ExperimentOutcome.NOT_RECORDED,
         )
-        response = self.client.get(reverse("studio:experiment-decision-tuning-history"), {"experiment_label": "Growth"})
+        response = self.client.get(
+            reverse("studio:experiment-decision-tuning-history"),
+            {"experiment_label": "Growth"},
+        )
         self.assertContains(response, "Growth rules test")
-        export = self.client.get(reverse("studio:experiment-decision-tuning-history-export"), {"experiment_label": "Growth"})
+        export = self.client.get(
+            reverse("studio:experiment-decision-tuning-history-export"),
+            {"experiment_label": "Growth"},
+        )
         self.assertContains(export, "preset_key")
         self.assertContains(export, "aggressive_growth")
         self.assertContains(export, "Growth rules test")
-
 
     def test_decision_rule_experiment_snapshot_create_and_export(self):
         tuning = ExperimentDecisionTuning.get_active()
@@ -2223,17 +2621,38 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             likes=10,
         )
         response = self.client.post(
-            reverse("studio:experiment-decision-tuning-experiment-snapshot-create", args=[log.pk]),
+            reverse(
+                "studio:experiment-decision-tuning-experiment-snapshot-create",
+                args=[log.pk],
+            ),
             {"window_days": 14, "notes": "Review lead magnet decision rules."},
         )
-        snapshot = ExperimentDecisionTuningExperimentSnapshot.objects.get(change_log=log)
-        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        snapshot = ExperimentDecisionTuningExperimentSnapshot.objects.get(
+            change_log=log
+        )
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:experiment-decision-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+        )
         self.assertEqual(snapshot.window_days, 14)
         self.assertEqual(snapshot.deltas["social"]["new_followers"]["change"], 4)
 
-        detail = self.client.get(reverse("studio:experiment-decision-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
-        self.assertContains(detail, "Decision recommendation")
-        export = self.client.get(reverse("studio:experiment-decision-tuning-experiment-snapshot-export", args=[snapshot.pk]))
+        detail = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            )
+        )
+        self.assertContains(detail, "DECISION RECOMMENDATION")
+        export = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-experiment-snapshot-export",
+                args=[snapshot.pk],
+            )
+        )
         self.assertContains(export, "Lead magnet decision snapshot")
         self.assertContains(export, "New followers")
 
@@ -2264,14 +2683,31 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             generated_by=self.staff,
         )
         response = self.client.post(
-            reverse("studio:experiment-decision-tuning-experiment-snapshot-detail", args=[snapshot.pk]),
-            {"action": "apply_decision_recommendation", "decision_note": "Looks strong."},
+            reverse(
+                "studio:experiment-decision-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+            {
+                "action": "apply_decision_recommendation",
+                "decision_note": "Looks strong.",
+            },
         )
-        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:experiment-decision-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+        )
         log.refresh_from_db()
-        self.assertEqual(log.experiment_outcome, ExperimentDecisionTuningChangeLog.ExperimentOutcome.POSITIVE)
-        self.assertIn("Decision-rule experiment recommendation from snapshot", log.experiment_notes)
-
+        self.assertEqual(
+            log.experiment_outcome,
+            ExperimentDecisionTuningChangeLog.ExperimentOutcome.POSITIVE,
+        )
+        self.assertIn(
+            "Decision-rule experiment recommendation from snapshot",
+            log.experiment_notes,
+        )
 
     def test_decision_rule_snapshot_comparison_page_and_export(self):
         tuning = ExperimentDecisionTuning.get_active()
@@ -2300,13 +2736,31 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             after_start=now - timedelta(days=7),
             after_end=now,
             deltas={
-                "social": {"new_followers": {"before": 1, "after": 5, "change": 4, "pct": 400}},
-                "resources": {"pdf_downloads": {"before": 0, "after": 2, "change": 2, "pct": None}},
-                "newsletter": {"clicks": {"before": 0, "after": 1, "change": 1, "pct": None}},
-                "ctas": {"cta_clicks": {"before": 0, "after": 3, "change": 3, "pct": None}},
-                "conversions": {"total_conversions": {"before": 0, "after": 4, "change": 4, "pct": None}},
+                "social": {
+                    "new_followers": {"before": 1, "after": 5, "change": 4, "pct": 400}
+                },
+                "resources": {
+                    "pdf_downloads": {"before": 0, "after": 2, "change": 2, "pct": None}
+                },
+                "newsletter": {
+                    "clicks": {"before": 0, "after": 1, "change": 1, "pct": None}
+                },
+                "ctas": {
+                    "cta_clicks": {"before": 0, "after": 3, "change": 3, "pct": None}
+                },
+                "conversions": {
+                    "total_conversions": {
+                        "before": 0,
+                        "after": 4,
+                        "change": 4,
+                        "pct": None,
+                    }
+                },
             },
-            summary={"primary_social_delta": {"change": 4}, "primary_conversion_delta": {"change": 4}},
+            summary={
+                "primary_social_delta": {"change": 4},
+                "primary_conversion_delta": {"change": 4},
+            },
             generated_by=self.staff,
         )
         second = ExperimentDecisionTuningExperimentSnapshot.objects.create(
@@ -2316,12 +2770,22 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             before_end=now - timedelta(days=14),
             after_start=now - timedelta(days=14),
             after_end=now,
-            deltas={"social": {"new_followers": {"before": 5, "after": 3, "change": -2, "pct": -40}}},
+            deltas={
+                "social": {
+                    "new_followers": {"before": 5, "after": 3, "change": -2, "pct": -40}
+                }
+            },
             summary={"primary_social_delta": {"change": -2}},
             generated_by=self.staff,
         )
-        params = {"snapshots": [first.pk, second.pk], "preset_keys": ["lead_magnet_focus"]}
-        response = self.client.get(reverse("studio:experiment-decision-tuning-experiment-snapshot-compare"), params)
+        params = {
+            "snapshots": [first.pk, second.pk],
+            "preset_keys": ["lead_magnet_focus"],
+        }
+        response = self.client.get(
+            reverse("studio:experiment-decision-tuning-experiment-snapshot-compare"),
+            params,
+        )
         self.assertContains(response, "Compare decision-rule snapshots")
         self.assertContains(response, "Aggressive rules test")
         self.assertContains(response, "Balanced rules test")
@@ -2329,14 +2793,21 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
         self.assertContains(response, "Visual comparison charts")
         self.assertContains(response, "Largest metric movements")
 
-        export = self.client.get(reverse("studio:experiment-decision-tuning-experiment-snapshot-compare-export"), params)
+        export = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-experiment-snapshot-compare-export"
+            ),
+            params,
+        )
         self.assertContains(export, "Summary comparison")
         self.assertContains(export, "Aggressive rules test")
         self.assertContains(export, "Decision recommendations")
         self.assertContains(export, "Chart data - top metric deltas")
         self.assertContains(export, "Chart data - decision counts")
 
-    def test_saved_decision_rule_snapshot_comparison_report_create_detail_and_export(self):
+    def test_saved_decision_rule_snapshot_comparison_report_create_detail_and_export(
+        self,
+    ):
         tuning = ExperimentDecisionTuning.get_active()
         log = ExperimentDecisionTuningChangeLog.objects.create(
             tuning=tuning,
@@ -2354,12 +2825,18 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             before_end=now - timedelta(days=14),
             after_start=now - timedelta(days=14),
             after_end=now,
-            deltas={"resources": {"pdf_downloads": {"before": 1, "after": 5, "change": 4, "pct": 400}}},
+            deltas={
+                "resources": {
+                    "pdf_downloads": {"before": 1, "after": 5, "change": 4, "pct": 400}
+                }
+            },
             summary={"primary_resource_delta": {"change": 4}},
             generated_by=self.staff,
         )
         response = self.client.post(
-            reverse("studio:experiment-decision-tuning-snapshot-comparison-report-create"),
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-create"
+            ),
             {
                 "title": "Lead magnet snapshot review",
                 "description": "Compare resource-focused rule changes.",
@@ -2368,14 +2845,28 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
                 "notes": "Keep an eye on downloads and learner conversions.",
             },
         )
-        report = ExperimentDecisionTuningSnapshotComparisonReport.objects.get(title="Lead magnet snapshot review")
-        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", args=[report.pk]))
+        report = ExperimentDecisionTuningSnapshotComparisonReport.objects.get(
+            title="Lead magnet snapshot review"
+        )
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-detail",
+                args=[report.pk],
+            ),
+        )
         self.assertEqual(report.snapshots.count(), 1)
         self.assertEqual(report.preset_keys, ["lead_magnet_focus"])
-        self.assertEqual(report.decision_status, ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED)
+        self.assertEqual(
+            report.decision_status,
+            ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED,
+        )
 
         update = self.client.post(
-            reverse("studio:experiment-decision-tuning-snapshot-comparison-report-update", args=[report.pk]),
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-update",
+                args=[report.pk],
+            ),
             {
                 "title": "Lead magnet snapshot review",
                 "description": "Compare resource-focused rule changes.",
@@ -2388,14 +2879,28 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
                 "decision_owner": self.staff.pk,
             },
         )
-        self.assertRedirects(update, reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", args=[report.pk]))
+        self.assertRedirects(
+            update,
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-detail",
+                args=[report.pk],
+            ),
+        )
         report.refresh_from_db()
-        self.assertEqual(report.decision_status, ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.WATCH)
+        self.assertEqual(
+            report.decision_status,
+            ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.WATCH,
+        )
         self.assertEqual(report.decision_owner, self.staff)
         self.assertEqual(report.decision_recorded_by, self.staff)
         self.assertIsNotNone(report.decision_recorded_at)
 
-        detail = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", args=[report.pk]))
+        detail = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-detail",
+                args=[report.pk],
+            )
+        )
         self.assertContains(detail, "Lead magnet snapshot review")
         self.assertContains(detail, "Lead Magnet Focus")
         self.assertContains(detail, "Resource downloads")
@@ -2405,14 +2910,26 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
         self.assertContains(detail, "Report decision")
         self.assertContains(detail, "Watch this rule set")
 
-        printable = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-print", args=[report.pk]))
-        self.assertContains(printable, "Code with Michael · Decision-Rule Comparison Report")
+        printable = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-print",
+                args=[report.pk],
+            )
+        )
+        self.assertContains(
+            printable, "Code with Michael · Decision-Rule Comparison Report"
+        )
         self.assertContains(printable, "Print / Save as PDF")
         self.assertContains(printable, "Executive summary")
         self.assertContains(printable, "Largest metric movements")
         self.assertContains(printable, "Prepared in Code with Michael Content Studio")
 
-        export = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-export", args=[report.pk]))
+        export = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-export",
+                args=[report.pk],
+            )
+        )
         self.assertContains(export, "Saved comparison report")
         self.assertContains(export, "Lead magnet snapshot review")
         self.assertContains(export, "decision_status")
@@ -2421,31 +2938,48 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
         self.assertContains(export, "Chart data - decision counts")
         self.assertContains(export, "Chart data - top metric deltas")
 
-        clone_get = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-clone", args=[report.pk]))
+        clone_get = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-clone",
+                args=[report.pk],
+            )
+        )
         self.assertContains(clone_get, "Clone saved report")
         self.assertContains(clone_get, "Decision fields are reset")
 
         clone_response = self.client.post(
-            reverse("studio:experiment-decision-tuning-snapshot-comparison-report-clone", args=[report.pk]),
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-clone",
+                args=[report.pk],
+            ),
             {
                 "title": "September lead magnet snapshot review",
                 "description": "Reuse the same comparison structure for September.",
                 "notes": "Fresh report for the next content cycle.",
             },
         )
-        cloned = ExperimentDecisionTuningSnapshotComparisonReport.objects.get(title="September lead magnet snapshot review")
-        self.assertRedirects(clone_response, reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", args=[cloned.pk]))
+        cloned = ExperimentDecisionTuningSnapshotComparisonReport.objects.get(
+            title="September lead magnet snapshot review"
+        )
+        self.assertRedirects(
+            clone_response,
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-detail",
+                args=[cloned.pk],
+            ),
+        )
         self.assertEqual(cloned.cloned_from, report)
         self.assertEqual(cloned.snapshots.count(), report.snapshots.count())
         self.assertEqual(cloned.preset_keys, report.preset_keys)
-        self.assertEqual(cloned.decision_status, ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED)
+        self.assertEqual(
+            cloned.decision_status,
+            ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED,
+        )
         self.assertEqual(cloned.decision_summary, "")
         self.assertEqual(cloned.decision_notes, "")
         self.assertIsNone(cloned.decision_owner)
         self.assertIsNone(cloned.decision_recorded_by)
         self.assertIsNone(cloned.decision_recorded_at)
-
-
 
     def test_report_template_usage_tracks_created_reports_and_exports_csv(self):
         tuning = ExperimentDecisionTuning.get_active()
@@ -2479,7 +3013,10 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             is_active=True,
         )
         response = self.client.post(
-            reverse("studio:experiment-decision-tuning-snapshot-comparison-report-from-template", args=[template.slug]),
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-from-template",
+                args=[template.slug],
+            ),
             {
                 "title": "July lead magnet review",
                 "description": "Template-created report.",
@@ -2488,25 +3025,44 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
                 "notes": "Created from the saved template.",
             },
         )
-        report = ExperimentDecisionTuningSnapshotComparisonReport.objects.get(title="July lead magnet review")
-        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-snapshot-comparison-report-detail", args=[report.pk]))
+        report = ExperimentDecisionTuningSnapshotComparisonReport.objects.get(
+            title="July lead magnet review"
+        )
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-detail",
+                args=[report.pk],
+            ),
+        )
         self.assertEqual(report.source_template, template)
 
-        report.decision_status = ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.KEEP
-        report.decision_summary = "Keep this template structure for the next lead magnet review."
+        report.decision_status = (
+            ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.KEEP
+        )
+        report.decision_summary = (
+            "Keep this template structure for the next lead magnet review."
+        )
         report.save(update_fields=["decision_status", "decision_summary", "updated_at"])
 
-        usage = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-usage"))
+        usage = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-template-usage"
+            )
+        )
         self.assertContains(usage, "Template usage analytics")
         self.assertContains(usage, "Lead Magnet Review")
         self.assertContains(usage, "July lead magnet review")
         self.assertContains(usage, "Keep / Roll back / Watch")
 
-        export = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-usage-export"))
+        export = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-template-usage-export"
+            )
+        )
         self.assertContains(export, "template_title")
         self.assertContains(export, "Lead Magnet Review")
         self.assertContains(export, "July lead magnet review")
-
 
     def test_report_template_recommendation_feedback_actions_and_history(self):
         self.client.force_login(self.user)
@@ -2520,7 +3076,9 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
         )
         recommendation_key = f"report-template:{template.pk}:type:{template.template_type}:window:{template.recommended_window_days}:snapshots:{template.recommended_snapshot_count}"
         response = self.client.post(
-            reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback-action"),
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback-action"
+            ),
             {
                 "template_id": template.pk,
                 "recommendation_key": recommendation_key,
@@ -2531,17 +3089,32 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
                 "reasons": "Good match||Worth testing",
             },
         )
-        self.assertRedirects(response, reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations"))
-        feedback = ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.objects.get(template=template)
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations"
+            ),
+        )
+        feedback = ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.objects.get(
+            template=template
+        )
         self.assertEqual(feedback.status, feedback.Status.USEFUL)
         self.assertEqual(feedback.score, 72)
 
-        history = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback"))
+        history = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback"
+            )
+        )
         self.assertContains(history, "Recommendation feedback")
         self.assertContains(history, "Feedback Template")
         self.assertContains(history, "Useful")
 
-        export = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback-export"))
+        export = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback-export"
+            )
+        )
         self.assertContains(export, "template_title")
         self.assertContains(export, "Feedback Template")
 
@@ -2555,7 +3128,11 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             is_active=True,
         )
         recommendation_key = f"report-template:{template.pk}:type:{template.template_type}:window:{template.recommended_window_days}:snapshots:{template.recommended_snapshot_count}"
-        before = next(item for item in build_report_template_recommendations(self.user, limit=20) if item.template == template)
+        before = next(
+            item
+            for item in build_report_template_recommendations(self.user, limit=20)
+            if item.template == template
+        )
         ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.objects.create(
             template=template,
             recommendation_key=recommendation_key,
@@ -2564,7 +3141,11 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             priority=before.priority,
             created_by=self.user,
         )
-        after = next(item for item in build_report_template_recommendations(self.user, limit=20) if item.template == template)
+        after = next(
+            item
+            for item in build_report_template_recommendations(self.user, limit=20)
+            if item.template == template
+        )
         self.assertLess(after.score, before.score)
         self.assertLess(after.score_parts.get("feedback", 0), 0)
 
@@ -2587,7 +3168,10 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             before_end=now - timedelta(days=14),
             after_start=now - timedelta(days=14),
             after_end=now,
-            summary={"primary_resource_delta": {"change": 5}, "primary_cta_delta": {"change": 3}},
+            summary={
+                "primary_resource_delta": {"change": 5},
+                "primary_cta_delta": {"change": 3},
+            },
             generated_by=self.user,
         )
         template = ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.create(
@@ -2601,38 +3185,57 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             focus_areas=["PDF downloads", "newsletter signups"],
             is_active=True,
         )
-        report = ExperimentDecisionTuningSnapshotComparisonReport.objects.create(
+        ExperimentDecisionTuningSnapshotComparisonReport.objects.create(
             title="Prior keep report",
             source_template=template,
             decision_status=ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.KEEP,
             created_by=self.user,
         )
-        response = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations"))
+        response = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations"
+            )
+        )
         self.assertContains(response, "Template recommendations")
         self.assertContains(response, "Lead Magnet Recommendation Test")
         self.assertContains(response, "Recent snapshots show lead-magnet activity")
-        self.assertContains(response, "Prior reports from this template produced 1 Keep decision")
+        self.assertContains(
+            response, "Prior reports from this template produced 1 Keep decision"
+        )
         self.assertContains(response, "Create report")
 
-        export = self.client.get(reverse("studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations-export"))
+        export = self.client.get(
+            reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations-export"
+            )
+        )
         self.assertContains(export, "template_title")
         self.assertContains(export, "Lead Magnet Recommendation Test")
         self.assertContains(export, "lead-magnet activity")
 
-
     def test_report_template_recommendation_tuning_screen_updates_weights(self):
         self.client.force_login(self.user)
         tuning = ReportTemplateRecommendationTuning.get_active()
-        response = self.client.get(reverse("studio:report-template-recommendation-tuning"))
+        response = self.client.get(
+            reverse("studio:report-template-recommendation-tuning")
+        )
         self.assertContains(response, "Recommendation tuning")
 
-        post_data = {field.name: getattr(tuning, field.name) for field in tuning._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data = {
+            field.name: getattr(tuning, field.name)
+            for field in tuning._meta.fields
+            if field.name not in {"id", "created_at", "updated_at"}
+        }
         post_data["base_template_score"] = 40
         post_data["high_priority_threshold"] = 90
         post_data["medium_priority_threshold"] = 60
         post_data["is_active"] = "on"
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning"), post_data)
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning"))
+        response = self.client.post(
+            reverse("studio:report-template-recommendation-tuning"), post_data
+        )
+        self.assertRedirects(
+            response, reverse("studio:report-template-recommendation-tuning")
+        )
         tuning.refresh_from_db()
         self.assertEqual(tuning.base_template_score, 40)
         self.assertEqual(tuning.high_priority_threshold, 90)
@@ -2646,26 +3249,43 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             recommended_window_days=14,
             is_active=True,
         )
-        before = next(item for item in build_report_template_recommendations(self.user, limit=20) if item.template == template)
+        before = next(
+            item
+            for item in build_report_template_recommendations(self.user, limit=20)
+            if item.template == template
+        )
         tuning = ReportTemplateRecommendationTuning.get_active()
         tuning.base_template_score = 5
         tuning.unused_template_bonus = 0
         tuning.save()
-        after = next(item for item in build_report_template_recommendations(self.user, limit=20) if item.template == template)
+        after = next(
+            item
+            for item in build_report_template_recommendations(self.user, limit=20)
+            if item.template == template
+        )
         self.assertLess(after.score, before.score)
-
 
     def test_report_template_recommendation_tuning_change_is_logged(self):
         self.client.force_login(self.user)
         tuning = ReportTemplateRecommendationTuning.get_active()
-        post_data = {field.name: getattr(tuning, field.name) for field in tuning._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data = {
+            field.name: getattr(tuning, field.name)
+            for field in tuning._meta.fields
+            if field.name not in {"id", "created_at", "updated_at"}
+        }
         post_data["base_template_score"] = tuning.base_template_score + 5
         post_data["is_active"] = "on"
         post_data["reason_note"] = "Testing template recommendation weights."
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning"), post_data)
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning"))
+        response = self.client.post(
+            reverse("studio:report-template-recommendation-tuning"), post_data
+        )
+        self.assertRedirects(
+            response, reverse("studio:report-template-recommendation-tuning")
+        )
         log = ReportTemplateRecommendationTuningChangeLog.objects.latest("created_at")
-        self.assertEqual(log.action, ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE)
+        self.assertEqual(
+            log.action, ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE
+        )
         self.assertIn("base_template_score", log.diff)
         self.assertIn("Testing template recommendation weights", log.reason)
 
@@ -2682,10 +3302,14 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             reason="Manual test change",
             request_path="/studio/test/",
         )
-        response = self.client.get(reverse("studio:report-template-recommendation-tuning-history"))
+        response = self.client.get(
+            reverse("studio:report-template-recommendation-tuning-history")
+        )
         self.assertContains(response, "Template recommendation tuning audit log")
         self.assertContains(response, "Manual test change")
-        export = self.client.get(reverse("studio:report-template-recommendation-tuning-history-export"))
+        export = self.client.get(
+            reverse("studio:report-template-recommendation-tuning-history-export")
+        )
         self.assertContains(export, "changed_fields")
         self.assertContains(export, "Manual test change")
 
@@ -2703,11 +3327,23 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
             diff={"base_template_score": {"before": 25, "after": 50}},
             reason="Experiment",
         )
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning-rollback", args=[log.pk]), {"snapshot": "before", "rollback_reason": "Restore safer default"})
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-history"))
+        response = self.client.post(
+            reverse(
+                "studio:report-template-recommendation-tuning-rollback", args=[log.pk]
+            ),
+            {"snapshot": "before", "rollback_reason": "Restore safer default"},
+        )
+        self.assertRedirects(
+            response, reverse("studio:report-template-recommendation-tuning-history")
+        )
         tuning.refresh_from_db()
         self.assertEqual(tuning.base_template_score, 25)
-        self.assertEqual(ReportTemplateRecommendationTuningChangeLog.objects.filter(action=ReportTemplateRecommendationTuningChangeLog.Action.ROLLBACK_RESTORED).count(), 1)
+        self.assertEqual(
+            ReportTemplateRecommendationTuningChangeLog.objects.filter(
+                action=ReportTemplateRecommendationTuningChangeLog.Action.ROLLBACK_RESTORED
+            ).count(),
+            1,
+        )
 
 
 class ReportTemplateRecommendationTuningExperimentTests(TestCase):
@@ -2721,18 +3357,35 @@ class ReportTemplateRecommendationTuningExperimentTests(TestCase):
     def test_manual_template_tuning_change_can_be_labeled_as_experiment(self):
         self.client.force_login(self.user)
         tuning = ReportTemplateRecommendationTuning.get_active()
-        post_data = {field.name: getattr(tuning, field.name) for field in tuning._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data = {
+            field.name: getattr(tuning, field.name)
+            for field in tuning._meta.fields
+            if field.name not in {"id", "created_at", "updated_at"}
+        }
         post_data["base_template_score"] = tuning.base_template_score + 3
         post_data["is_active"] = "on"
-        post_data["reason_note"] = "Test whether lower template thresholds improve report usage."
+        post_data["reason_note"] = (
+            "Test whether lower template thresholds improve report usage."
+        )
         post_data["experiment_label"] = "August template ranking test"
-        post_data["experiment_status"] = ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.RUNNING
-        post_data["experiment_notes"] = "Hypothesis: more recommended templates will create more saved reports."
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning"), post_data)
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning"))
+        post_data["experiment_status"] = (
+            ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.RUNNING
+        )
+        post_data["experiment_notes"] = (
+            "Hypothesis: more recommended templates will create more saved reports."
+        )
+        response = self.client.post(
+            reverse("studio:report-template-recommendation-tuning"), post_data
+        )
+        self.assertRedirects(
+            response, reverse("studio:report-template-recommendation-tuning")
+        )
         log = ReportTemplateRecommendationTuningChangeLog.objects.latest("created_at")
         self.assertEqual(log.experiment_label, "August template ranking test")
-        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.RUNNING)
+        self.assertEqual(
+            log.experiment_status,
+            ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.RUNNING,
+        )
         self.assertIn("more recommended templates", log.experiment_notes)
 
     def test_template_tuning_experiment_outcome_can_be_recorded(self):
@@ -2748,19 +3401,31 @@ class ReportTemplateRecommendationTuningExperimentTests(TestCase):
             experiment_label="Template usage lift test",
             experiment_status=ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.RUNNING,
         )
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning-experiment", args=[log.pk]), {
-            "experiment_label": "Template usage lift test",
-            "experiment_status": ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.KEEP,
-            "experiment_outcome": ReportTemplateRecommendationTuningChangeLog.ExperimentOutcome.POSITIVE,
-            "experiment_notes": "Template recommendations created more saved reports; keep this setting.",
-        })
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-history"))
+        response = self.client.post(
+            reverse(
+                "studio:report-template-recommendation-tuning-experiment", args=[log.pk]
+            ),
+            {
+                "experiment_label": "Template usage lift test",
+                "experiment_status": ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.KEEP,
+                "experiment_outcome": ReportTemplateRecommendationTuningChangeLog.ExperimentOutcome.POSITIVE,
+                "experiment_notes": "Template recommendations created more saved reports; keep this setting.",
+            },
+        )
+        self.assertRedirects(
+            response, reverse("studio:report-template-recommendation-tuning-history")
+        )
         log.refresh_from_db()
-        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.KEEP)
-        self.assertEqual(log.experiment_outcome, ReportTemplateRecommendationTuningChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertEqual(
+            log.experiment_status,
+            ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.KEEP,
+        )
+        self.assertEqual(
+            log.experiment_outcome,
+            ReportTemplateRecommendationTuningChangeLog.ExperimentOutcome.POSITIVE,
+        )
         self.assertIsNotNone(log.outcome_recorded_at)
         self.assertEqual(log.outcome_recorded_by, self.user)
-
 
     def test_template_tuning_experiment_snapshot_can_be_created_and_exported(self):
         self.client.force_login(self.user)
@@ -2775,14 +3440,36 @@ class ReportTemplateRecommendationTuningExperimentTests(TestCase):
             experiment_label="Template recommendation usage test",
             experiment_status=ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.RUNNING,
         )
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-create", args=[log.pk]), {"window_days": 7, "notes": "Review template usage lift."})
+        response = self.client.post(
+            reverse(
+                "studio:report-template-recommendation-tuning-experiment-snapshot-create",
+                args=[log.pk],
+            ),
+            {"window_days": 7, "notes": "Review template usage lift."},
+        )
         snapshot = ReportTemplateRecommendationTuningExperimentSnapshot.objects.get()
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:report-template-recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+        )
         self.assertEqual(snapshot.window_days, 7)
         self.assertIn("template_usage", snapshot.deltas)
-        detail = self.client.get(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        detail = self.client.get(
+            reverse(
+                "studio:report-template-recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            )
+        )
         self.assertContains(detail, "Template usage")
-        export = self.client.get(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-export", args=[snapshot.pk]))
+        export = self.client.get(
+            reverse(
+                "studio:report-template-recommendation-tuning-experiment-snapshot-export",
+                args=[snapshot.pk],
+            )
+        )
         self.assertContains(export, "Template recommendation usage test")
         self.assertContains(export, "Reports created")
 
@@ -2810,28 +3497,78 @@ class ReportTemplateRecommendationTuningExperimentTests(TestCase):
             before_metrics={},
             after_metrics={},
             deltas={
-                "template_usage": {"reports_created": {"before": 1, "after": 4, "change": 3, "pct": 300}},
-                "saved_reports": {"reports_created": {"before": 1, "after": 5, "change": 4, "pct": 400}},
-                "decision_outcomes": {"keep_decisions": {"before": 0, "after": 2, "change": 2, "pct": None}},
-                "recommendation_feedback": {"useful_feedback": {"before": 0, "after": 3, "change": 3, "pct": None}},
+                "template_usage": {
+                    "reports_created": {
+                        "before": 1,
+                        "after": 4,
+                        "change": 3,
+                        "pct": 300,
+                    }
+                },
+                "saved_reports": {
+                    "reports_created": {
+                        "before": 1,
+                        "after": 5,
+                        "change": 4,
+                        "pct": 400,
+                    }
+                },
+                "decision_outcomes": {
+                    "keep_decisions": {
+                        "before": 0,
+                        "after": 2,
+                        "change": 2,
+                        "pct": None,
+                    }
+                },
+                "recommendation_feedback": {
+                    "useful_feedback": {
+                        "before": 0,
+                        "after": 3,
+                        "change": 3,
+                        "pct": None,
+                    }
+                },
             },
             summary={},
             generated_by=self.user,
         )
-        detail = self.client.get(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        detail = self.client.get(
+            reverse(
+                "studio:report-template-recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            )
+        )
         self.assertContains(detail, "DECISION RECOMMENDATION")
         self.assertContains(detail, "Keep changes")
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]), {
-            "action": "apply_template_recommendation_decision",
-            "decision_note": "Useful template recommendations increased.",
-        })
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        response = self.client.post(
+            reverse(
+                "studio:report-template-recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+            {
+                "action": "apply_template_recommendation_decision",
+                "decision_note": "Useful template recommendations increased.",
+            },
+        )
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:report-template-recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+        )
         log.refresh_from_db()
-        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.KEEP)
-        self.assertEqual(log.experiment_outcome, ReportTemplateRecommendationTuningChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertEqual(
+            log.experiment_status,
+            ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.KEEP,
+        )
+        self.assertEqual(
+            log.experiment_outcome,
+            ReportTemplateRecommendationTuningChangeLog.ExperimentOutcome.POSITIVE,
+        )
         self.assertIn("Useful template recommendations increased", log.experiment_notes)
         self.assertEqual(log.outcome_recorded_by, self.user)
-
 
 
 class ReportTemplateRecommendationTuningDecisionRulesTests(TestCase):
@@ -2845,12 +3582,22 @@ class ReportTemplateRecommendationTuningDecisionRulesTests(TestCase):
     def test_template_recommendation_decision_rules_can_be_updated(self):
         self.client.force_login(self.user)
         rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
-        post_data = {field.name: getattr(rules, field.name) for field in rules._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data = {
+            field.name: getattr(rules, field.name)
+            for field in rules._meta.fields
+            if field.name not in {"id", "created_at", "updated_at"}
+        }
         post_data["is_active"] = "on"
         post_data["keep_score_threshold"] = 12
         post_data["feedback_useful_weight"] = 6
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules"), post_data)
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules"))
+        response = self.client.post(
+            reverse("studio:report-template-recommendation-tuning-decision-rules"),
+            post_data,
+        )
+        self.assertRedirects(
+            response,
+            reverse("studio:report-template-recommendation-tuning-decision-rules"),
+        )
         rules.refresh_from_db()
         self.assertEqual(rules.keep_score_threshold, 12)
         self.assertEqual(rules.feedback_useful_weight, 6)
@@ -2876,26 +3623,49 @@ class ReportTemplateRecommendationTuningDecisionRulesTests(TestCase):
             after_start=now,
             after_end=now + timedelta(days=14),
             deltas={
-                "template_usage": {"reports_created": {"before": 1, "after": 3, "change": 2}},
-                "recommendation_feedback": {"useful_feedback": {"before": 0, "after": 2, "change": 2}},
+                "template_usage": {
+                    "reports_created": {"before": 1, "after": 3, "change": 2}
+                },
+                "recommendation_feedback": {
+                    "useful_feedback": {"before": 0, "after": 2, "change": 2}
+                },
             },
         )
-        detail = self.client.get(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        detail = self.client.get(
+            reverse(
+                "studio:report-template-recommendation-tuning-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            )
+        )
         self.assertContains(detail, "Keep watching")
         self.assertContains(detail, "Strict template decision test")
-
 
     def test_template_recommendation_decision_rules_update_is_logged(self):
         self.client.force_login(self.user)
         rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
-        post_data = {field.name: getattr(rules, field.name) for field in rules._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data = {
+            field.name: getattr(rules, field.name)
+            for field in rules._meta.fields
+            if field.name not in {"id", "created_at", "updated_at"}
+        }
         post_data["is_active"] = "on"
         post_data["keep_score_threshold"] = 14
         post_data["change_reason"] = "Testing stricter keep threshold."
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules"), post_data)
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules"))
-        log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.latest("created_at")
-        self.assertEqual(log.action, ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.MANUAL_UPDATE)
+        response = self.client.post(
+            reverse("studio:report-template-recommendation-tuning-decision-rules"),
+            post_data,
+        )
+        self.assertRedirects(
+            response,
+            reverse("studio:report-template-recommendation-tuning-decision-rules"),
+        )
+        log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.latest(
+            "created_at"
+        )
+        self.assertEqual(
+            log.action,
+            ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.MANUAL_UPDATE,
+        )
         self.assertIn("keep_score_threshold", log.diff)
         self.assertEqual(log.reason, "Testing stricter keep threshold.")
 
@@ -2911,11 +3681,22 @@ class ReportTemplateRecommendationTuningDecisionRulesTests(TestCase):
             diff={"keep_score_threshold": {"before": 8, "after": 12}},
             reason="Audit test",
         )
-        history = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-history"))
+        history = self.client.get(
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-history"
+            )
+        )
         self.assertContains(history, "Audit test")
-        export = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-history-export"))
+        export = self.client.get(
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-history-export"
+            )
+        )
         self.assertEqual(export.status_code, 200)
-        self.assertIn("report_template_recommendation_decision_rule_history.csv", export["Content-Disposition"])
+        self.assertIn(
+            "report_template_recommendation_decision_rule_history.csv",
+            export["Content-Disposition"],
+        )
         self.assertContains(export, "keep_score_threshold")
 
     def test_template_recommendation_decision_rules_rollback_restores_snapshot(self):
@@ -2931,30 +3712,64 @@ class ReportTemplateRecommendationTuningDecisionRulesTests(TestCase):
             after={"name": rules.name, "is_active": True, "keep_score_threshold": 22},
             diff={"keep_score_threshold": {"before": 8, "after": 22}},
         )
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules-rollback", args=[log.pk]), {"snapshot": "before", "rollback_reason": "Undo test"})
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules-history"))
+        response = self.client.post(
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-rollback",
+                args=[log.pk],
+            ),
+            {"snapshot": "before", "rollback_reason": "Undo test"},
+        )
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-history"
+            ),
+        )
         rules.refresh_from_db()
         self.assertEqual(rules.keep_score_threshold, 8)
-        self.assertEqual(ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.count(), 2)
+        self.assertEqual(
+            ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.count(), 2
+        )
 
     def test_template_recommendation_decision_rules_experiment_fields_are_logged(self):
         self.client.force_login(self.user)
         rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
-        post_data = {field.name: getattr(rules, field.name) for field in rules._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data = {
+            field.name: getattr(rules, field.name)
+            for field in rules._meta.fields
+            if field.name not in {"id", "created_at", "updated_at"}
+        }
         post_data["is_active"] = "on"
         post_data["keep_score_threshold"] = 16
         post_data["change_reason"] = "Threshold experiment."
         post_data["experiment_label"] = "September decision-rule test"
-        post_data["experiment_status"] = ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.RUNNING
-        post_data["experiment_notes"] = "Hypothesis: stricter keep rules reduce false positives."
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules"), post_data)
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules"))
-        log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.latest("created_at")
+        post_data["experiment_status"] = (
+            ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.RUNNING
+        )
+        post_data["experiment_notes"] = (
+            "Hypothesis: stricter keep rules reduce false positives."
+        )
+        response = self.client.post(
+            reverse("studio:report-template-recommendation-tuning-decision-rules"),
+            post_data,
+        )
+        self.assertRedirects(
+            response,
+            reverse("studio:report-template-recommendation-tuning-decision-rules"),
+        )
+        log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.latest(
+            "created_at"
+        )
         self.assertEqual(log.experiment_label, "September decision-rule test")
-        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.RUNNING)
+        self.assertEqual(
+            log.experiment_status,
+            ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.RUNNING,
+        )
         self.assertIn("stricter keep rules", log.experiment_notes)
 
-    def test_template_recommendation_decision_rules_experiment_outcome_can_be_recorded(self):
+    def test_template_recommendation_decision_rules_experiment_outcome_can_be_recorded(
+        self,
+    ):
         self.client.force_login(self.user)
         rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
         log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.create(
@@ -2967,20 +3782,38 @@ class ReportTemplateRecommendationTuningDecisionRulesTests(TestCase):
             experiment_label="Decision threshold test",
             experiment_status=ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.RUNNING,
         )
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment", args=[log.pk]), {
-            "experiment_label": "Decision threshold test",
-            "experiment_status": ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.COMPLETE,
-            "experiment_outcome": ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.POSITIVE,
-            "experiment_notes": "Decision quality improved; keep the new thresholds.",
-        })
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules-history"))
+        response = self.client.post(
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-experiment",
+                args=[log.pk],
+            ),
+            {
+                "experiment_label": "Decision threshold test",
+                "experiment_status": ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.COMPLETE,
+                "experiment_outcome": ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.POSITIVE,
+                "experiment_notes": "Decision quality improved; keep the new thresholds.",
+            },
+        )
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-history"
+            ),
+        )
         log.refresh_from_db()
-        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.COMPLETE)
-        self.assertEqual(log.experiment_outcome, ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertEqual(
+            log.experiment_status,
+            ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.COMPLETE,
+        )
+        self.assertEqual(
+            log.experiment_outcome,
+            ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.POSITIVE,
+        )
         self.assertEqual(log.outcome_recorded_by, self.user)
 
-
-    def test_template_recommendation_decision_rule_snapshot_can_be_created_and_exported(self):
+    def test_template_recommendation_decision_rule_snapshot_can_be_created_and_exported(
+        self,
+    ):
         self.client.force_login(self.user)
         rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
         log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.create(
@@ -2990,21 +3823,46 @@ class ReportTemplateRecommendationTuningDecisionRulesTests(TestCase):
             experiment_label="Decision-rule snapshot test",
             experiment_status=ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.RUNNING,
         )
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-create", args=[log.pk]), {
-            "window_days": 14,
-            "notes": "Compare before and after decision-rule thresholds.",
-        })
-        snapshot = ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot.objects.get(change_log=log)
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", args=[snapshot.pk]))
-        detail = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", args=[snapshot.pk]))
+        response = self.client.post(
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-create",
+                args=[log.pk],
+            ),
+            {
+                "window_days": 14,
+                "notes": "Compare before and after decision-rule thresholds.",
+            },
+        )
+        snapshot = ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot.objects.get(
+            change_log=log
+        )
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+        )
+        detail = self.client.get(
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            )
+        )
         self.assertContains(detail, "Decision-rule snapshot test")
         self.assertContains(detail, "Template usage")
-        export = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-export", args=[snapshot.pk]))
+        export = self.client.get(
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-export",
+                args=[snapshot.pk],
+            )
+        )
         self.assertEqual(export.status_code, 200)
         self.assertContains(export, "Decision-rule snapshot test")
 
-
-    def test_template_recommendation_decision_rule_snapshot_recommendation_can_be_recorded(self):
+    def test_template_recommendation_decision_rule_snapshot_recommendation_can_be_recorded(
+        self,
+    ):
         self.client.force_login(self.user)
         rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
         log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.create(
@@ -3025,33 +3883,87 @@ class ReportTemplateRecommendationTuningDecisionRulesTests(TestCase):
             before_metrics={},
             after_metrics={},
             deltas={
-                "template_usage": {"reports_created": {"before": 1, "after": 4, "change": 3, "pct": 300}},
-                "decision_outcomes": {"keep_decisions": {"before": 0, "after": 2, "change": 2, "pct": None}},
-                "recommendation_feedback": {"useful_feedback": {"before": 1, "after": 5, "change": 4, "pct": 400}},
+                "template_usage": {
+                    "reports_created": {
+                        "before": 1,
+                        "after": 4,
+                        "change": 3,
+                        "pct": 300,
+                    }
+                },
+                "decision_outcomes": {
+                    "keep_decisions": {
+                        "before": 0,
+                        "after": 2,
+                        "change": 2,
+                        "pct": None,
+                    }
+                },
+                "recommendation_feedback": {
+                    "useful_feedback": {
+                        "before": 1,
+                        "after": 5,
+                        "change": 4,
+                        "pct": 400,
+                    }
+                },
             },
-            summary={"primary_template_delta": {"change": 3}, "primary_feedback_delta": {"change": 4}},
+            summary={
+                "primary_template_delta": {"change": 3},
+                "primary_feedback_delta": {"change": 4},
+            },
             generated_by=self.user,
         )
-        detail = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", args=[snapshot.pk]))
+        detail = self.client.get(
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            )
+        )
         self.assertContains(detail, "DECISION RECOMMENDATION")
         self.assertContains(detail, "Keep changes")
-        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", args=[snapshot.pk]), {
-            "action": "apply_template_decision_rule_snapshot_decision",
-            "decision_note": "Looks better.",
-        })
-        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", args=[snapshot.pk]))
+        response = self.client.post(
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+            {
+                "action": "apply_template_decision_rule_snapshot_decision",
+                "decision_note": "Looks better.",
+            },
+        )
+        self.assertRedirects(
+            response,
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail",
+                args=[snapshot.pk],
+            ),
+        )
         log.refresh_from_db()
-        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.KEEP)
-        self.assertEqual(log.experiment_outcome, ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertEqual(
+            log.experiment_status,
+            ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.KEEP,
+        )
+        self.assertEqual(
+            log.experiment_outcome,
+            ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.POSITIVE,
+        )
         self.assertIn("Looks better", log.experiment_notes)
-        export = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-export", args=[snapshot.pk]))
+        export = self.client.get(
+            reverse(
+                "studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-export",
+                args=[snapshot.pk],
+            )
+        )
         self.assertContains(export, "decision_recommendation")
 
 
 class ProjectHealthTests(TestCase):
     def setUp(self):
         User = get_user_model()
-        self.staff = User.objects.create_user(email="health@example.com", password="password", is_staff=True)
+        self.staff = User.objects.create_user(
+            email="health@example.com", password="password", is_staff=True
+        )
         self.lesson = Lesson.objects.create(
             title="Health Check Lesson",
             summary="A beginner lesson used for project health tests.",
@@ -3080,6 +3992,8 @@ class ProjectHealthTests(TestCase):
         self.client.force_login(self.staff)
         response = self.client.get(reverse("studio:project-health-export"))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
         self.assertIn("project-health", response["Content-Disposition"])
-        self.assertContains(response, "section,status,title,detail,count,action_label,action_url")
+        self.assertContains(
+            response, "section,status,title,detail,count,action_label,action_url"
+        )

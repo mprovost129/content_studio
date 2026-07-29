@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
 
 from studio.models import RecommendationTuning, RecommendationTuningChangeLog
 
@@ -139,7 +138,9 @@ def tuning_snapshot(tuning: RecommendationTuning) -> dict[str, object]:
     return {field: getattr(tuning, field) for field in TUNING_TRACKED_FIELDS}
 
 
-def tuning_diff(before: dict[str, object], after: dict[str, object]) -> dict[str, dict[str, object]]:
+def tuning_diff(
+    before: dict[str, object], after: dict[str, object]
+) -> dict[str, dict[str, object]]:
     diff = {}
     for field in TUNING_TRACKED_FIELDS:
         old = before.get(field)
@@ -169,7 +170,9 @@ def create_tuning_change_log(
     return RecommendationTuningChangeLog.objects.create(
         tuning=tuning,
         action=action,
-        changed_by=changed_by if getattr(changed_by, "is_authenticated", False) else None,
+        changed_by=changed_by
+        if getattr(changed_by, "is_authenticated", False)
+        else None,
         preset_key=preset.key if preset else "",
         preset_name=preset.name if preset else "",
         reason=reason,
@@ -178,7 +181,8 @@ def create_tuning_change_log(
         diff=diff,
         request_path=request_path[:300],
         experiment_label=(experiment_label or "")[:160],
-        experiment_status=experiment_status or RecommendationTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+        experiment_status=experiment_status
+        or RecommendationTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
         experiment_notes=experiment_notes or "",
     )
 
@@ -187,8 +191,15 @@ def get_preset(key: str) -> RecommendationTuningPreset | None:
     return next((preset for preset in PRESETS if preset.key == key), None)
 
 
-def clone_tuning(tuning: RecommendationTuning, *, name: str | None = None, preset: RecommendationTuningPreset | None = None) -> RecommendationTuning:
-    clone = RecommendationTuning(name=name or tuning.name, is_active=False, notes=tuning.notes)
+def clone_tuning(
+    tuning: RecommendationTuning,
+    *,
+    name: str | None = None,
+    preset: RecommendationTuningPreset | None = None,
+) -> RecommendationTuning:
+    clone = RecommendationTuning(
+        name=name or tuning.name, is_active=False, notes=tuning.notes
+    )
     for field in TUNING_WEIGHT_FIELDS:
         setattr(clone, field, getattr(tuning, field))
     if preset:
@@ -232,7 +243,9 @@ def apply_preset_to_active_tuning(
     return tuning
 
 
-def preset_rows(active_tuning: RecommendationTuning | None = None) -> list[dict[str, object]]:
+def preset_rows(
+    active_tuning: RecommendationTuning | None = None,
+) -> list[dict[str, object]]:
     active_tuning = active_tuning or RecommendationTuning.get_active()
     rows = []
     for preset in PRESETS:
@@ -240,8 +253,17 @@ def preset_rows(active_tuning: RecommendationTuning | None = None) -> list[dict[
         for field, value in preset.values.items():
             current = getattr(active_tuning, field)
             if current != value:
-                changes.append({"field": field, "current": current, "preset": value, "delta": value - current})
-        rows.append({"preset": preset, "changes": changes, "change_count": len(changes)})
+                changes.append(
+                    {
+                        "field": field,
+                        "current": current,
+                        "preset": value,
+                        "delta": value - current,
+                    }
+                )
+        rows.append(
+            {"preset": preset, "changes": changes, "change_count": len(changes)}
+        )
     return rows
 
 
@@ -271,7 +293,9 @@ def restore_tuning_snapshot(
     active.is_active = True
     active.save()
     restore_label = "before" if snapshot == "before" else "after"
-    default_reason = f"Restored the {restore_label} snapshot from tuning change #{source_log.pk}."
+    default_reason = (
+        f"Restored the {restore_label} snapshot from tuning change #{source_log.pk}."
+    )
     create_tuning_change_log(
         active,
         before=before,
@@ -281,6 +305,8 @@ def restore_tuning_snapshot(
         request_path=request_path,
         experiment_label=source_log.experiment_label,
         experiment_status=RecommendationTuningChangeLog.ExperimentStatus.ROLLBACK,
-        experiment_notes=f"Rollback from experiment: {source_log.experiment_notes}" if source_log.experiment_notes else "",
+        experiment_notes=f"Rollback from experiment: {source_log.experiment_notes}"
+        if source_log.experiment_notes
+        else "",
     )
     return active

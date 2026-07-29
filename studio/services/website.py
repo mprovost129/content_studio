@@ -22,9 +22,17 @@ def _absolute_url(request, url):
 
 def _reading_minutes(lesson):
     words = len(re.findall(r"\b\w+\b", lesson.summary))
-    words += sum(len(re.findall(r"\b\w+\b", block.content)) for block in lesson.blocks.all())
-    words += sum(len(re.findall(r"\b\w+\b", question.prompt)) for question in lesson.quiz_questions.all())
-    words += sum(len(re.findall(r"\b\w+\b", challenge.prompt)) for challenge in lesson.code_challenges.all())
+    words += sum(
+        len(re.findall(r"\b\w+\b", block.content)) for block in lesson.blocks.all()
+    )
+    words += sum(
+        len(re.findall(r"\b\w+\b", question.prompt))
+        for question in lesson.quiz_questions.all()
+    )
+    words += sum(
+        len(re.findall(r"\b\w+\b", challenge.prompt))
+        for challenge in lesson.code_challenges.all()
+    )
     return max(1, math.ceil(words / 200))
 
 
@@ -130,7 +138,9 @@ def serialize_lesson(lesson: Lesson, request=None) -> dict:
             "status_label": campaign.get_status_display(),
             "target_segment": campaign.target_segment,
             "target_segment_label": campaign.get_target_segment_display(),
-            "scheduled_at": campaign.scheduled_at.isoformat() if campaign.scheduled_at else "",
+            "scheduled_at": campaign.scheduled_at.isoformat()
+            if campaign.scheduled_at
+            else "",
             "sent_at": campaign.sent_at.isoformat() if campaign.sent_at else "",
             "estimated_recipients": campaign.estimated_recipients,
             "actual_recipients": campaign.actual_recipients,
@@ -146,7 +156,9 @@ def serialize_lesson(lesson: Lesson, request=None) -> dict:
             "provider_url": campaign.provider_url,
             "provider_sync_status": campaign.provider_sync_status,
             "provider_sync_status_label": campaign.get_provider_sync_status_display(),
-            "provider_last_synced_at": campaign.provider_last_synced_at.isoformat() if campaign.provider_last_synced_at else "",
+            "provider_last_synced_at": campaign.provider_last_synced_at.isoformat()
+            if campaign.provider_last_synced_at
+            else "",
         }
         for campaign in lesson.newsletter_campaigns.all()
     ]
@@ -226,6 +238,7 @@ def serialize_lesson(lesson: Lesson, request=None) -> dict:
             "assets": assets,
             "content_plans": content_plans,
             "publishing_records": publishing_records,
+            "newsletter_campaigns": newsletter_campaigns,
             "updated_at": lesson.updated_at.isoformat(),
         },
         "brand": {"name": brand.name, "social_handle": brand.social_handle},
@@ -239,21 +252,33 @@ def seo_diagnostics(lesson: Lesson) -> dict:
     if not lesson.summary:
         issues.append({"level": "error", "message": "Add a lesson summary."})
     if not lesson.learning_objective:
-        issues.append({"level": "warning", "message": "Add a learner-facing objective."})
+        issues.append(
+            {"level": "warning", "message": "Add a learner-facing objective."}
+        )
     if not lesson.beginner_takeaway:
         issues.append({"level": "warning", "message": "Add a beginner takeaway."})
     if not lesson.blocks.exists():
         issues.append({"level": "error", "message": "Add at least one content block."})
     if not lesson.quiz_questions.exists() and not lesson.code_challenges.exists():
-        issues.append({"level": "warning", "message": "Add a structured quiz question or code challenge."})
+        issues.append(
+            {
+                "level": "warning",
+                "message": "Add a structured quiz question or code challenge.",
+            }
+        )
     if not lesson.seo_title:
         issues.append({"level": "warning", "message": "Add a dedicated SEO title."})
     elif not 30 <= len(title) <= 60:
         issues.append(
-            {"level": "warning", "message": "Keep the SEO title between 30 and 60 characters."}
+            {
+                "level": "warning",
+                "message": "Keep the SEO title between 30 and 60 characters.",
+            }
         )
     if not lesson.seo_description:
-        issues.append({"level": "warning", "message": "Add a dedicated SEO description."})
+        issues.append(
+            {"level": "warning", "message": "Add a dedicated SEO description."}
+        )
     elif not 120 <= len(description) <= 160:
         issues.append(
             {
@@ -277,7 +302,9 @@ def seo_diagnostics(lesson: Lesson) -> dict:
     }
 
 
-def render_website_page(lesson: Lesson, request=None, is_preview=False) -> tuple[str, dict]:
+def render_website_page(
+    lesson: Lesson, request=None, is_preview=False
+) -> tuple[str, dict]:
     payload = serialize_lesson(lesson, request=request)
     lesson_data = payload["lesson"]
     canonical_url = (
@@ -297,7 +324,9 @@ def render_website_page(lesson: Lesson, request=None, is_preview=False) -> tuple
         "proficiencyLevel": lesson_data["difficulty_label"],
         "mainEntityOfPage": canonical_url,
     }
-    structured_json = json.dumps(structured_data, ensure_ascii=False).replace("<", "\\u003c")
+    structured_json = json.dumps(structured_data, ensure_ascii=False).replace(
+        "<", "\\u003c"
+    )
     html = render_to_string(
         "studio/website_page.html",
         {

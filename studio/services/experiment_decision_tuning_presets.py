@@ -12,7 +12,6 @@ from studio.services.experiment_decision_tuning_history import (
     decision_tuning_snapshot,
 )
 
-
 DECISION_TUNING_WEIGHT_FIELDS = tuple(
     field
     for field in decision_tuning_field_names()
@@ -113,7 +112,9 @@ DECISION_PRESETS: tuple[ExperimentDecisionTuningPreset, ...] = (
     ),
 )
 
-DECISION_PRESET_CHOICES = tuple((preset.key, preset.name) for preset in DECISION_PRESETS)
+DECISION_PRESET_CHOICES = tuple(
+    (preset.key, preset.name) for preset in DECISION_PRESETS
+)
 
 
 def get_decision_preset(key: str) -> ExperimentDecisionTuningPreset | None:
@@ -126,7 +127,9 @@ def clone_decision_tuning(
     name: str | None = None,
     preset: ExperimentDecisionTuningPreset | None = None,
 ) -> ExperimentDecisionTuning:
-    clone = ExperimentDecisionTuning(name=name or tuning.name, is_active=False, notes=tuning.notes)
+    clone = ExperimentDecisionTuning(
+        name=name or tuning.name, is_active=False, notes=tuning.notes
+    )
     for field in DECISION_TUNING_WEIGHT_FIELDS:
         setattr(clone, field, getattr(tuning, field))
     if preset:
@@ -173,13 +176,16 @@ def apply_decision_preset_to_active_tuning(
         reason=reason or f"Applied decision-rule preset: {preset.name}.",
         request_path=request_path,
         experiment_label=experiment_label,
-        experiment_status=experiment_status or ExperimentDecisionTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+        experiment_status=experiment_status
+        or ExperimentDecisionTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
         experiment_notes=experiment_notes,
     )
     return tuning
 
 
-def decision_preset_rows(active_tuning: ExperimentDecisionTuning | None = None) -> list[dict[str, object]]:
+def decision_preset_rows(
+    active_tuning: ExperimentDecisionTuning | None = None,
+) -> list[dict[str, object]]:
     active_tuning = active_tuning or ExperimentDecisionTuning.get_active()
     rows: list[dict[str, object]] = []
     for preset in DECISION_PRESETS:
@@ -188,8 +194,19 @@ def decision_preset_rows(active_tuning: ExperimentDecisionTuning | None = None) 
             current = getattr(active_tuning, field)
             if current != value:
                 delta = None
-                if isinstance(current, (int, float)) and isinstance(value, (int, float)):
+                if isinstance(current, (int, float)) and isinstance(
+                    value, (int, float)
+                ):
                     delta = value - current
-                changes.append({"field": field, "current": current, "preset": value, "delta": delta})
-        rows.append({"preset": preset, "changes": changes, "change_count": len(changes)})
+                changes.append(
+                    {
+                        "field": field,
+                        "current": current,
+                        "preset": value,
+                        "delta": delta,
+                    }
+                )
+        rows.append(
+            {"preset": preset, "changes": changes, "change_count": len(changes)}
+        )
     return rows

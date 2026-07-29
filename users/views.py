@@ -3,12 +3,17 @@ from datetime import datetime, timedelta
 from django.contrib import messages
 from django.contrib.auth import login
 from django.shortcuts import redirect
-from django.utils import timezone
 from django.urls import reverse_lazy
+from django.utils import timezone
 from django.views.generic import CreateView, UpdateView
 
+from studio.models import (
+    LearningResource,
+    ResourceLessonConversionEvent,
+    ResourcePerformanceEvent,
+)
+
 from .forms import LearnerProfileForm, LearnerRegistrationForm
-from studio.models import LearningResource, ResourceLessonConversionEvent, ResourcePerformanceEvent
 
 
 def _track_signup_resource_conversion(request, user):
@@ -19,8 +24,18 @@ def _track_signup_resource_conversion(request, user):
     source_event = None
     event_id = data.get("event_id")
     if event_id:
-        source_event = ResourcePerformanceEvent.objects.filter(pk=event_id, resource_id=resource_id).select_related("resource", "subscriber").first()
-    resource = source_event.resource if source_event else LearningResource.objects.filter(pk=resource_id).first()
+        source_event = (
+            ResourcePerformanceEvent.objects.filter(
+                pk=event_id, resource_id=resource_id
+            )
+            .select_related("resource", "subscriber")
+            .first()
+        )
+    resource = (
+        source_event.resource
+        if source_event
+        else LearningResource.objects.filter(pk=resource_id).first()
+    )
     if not resource:
         return None
     occurred_at = source_event.occurred_at if source_event else None
@@ -43,8 +58,12 @@ def _track_signup_resource_conversion(request, user):
         source_event=source_event,
         subscriber=source_event.subscriber if source_event else None,
         user=user,
-        email=(getattr(user, "email", "") or (source_event.email if source_event else ""))[:254],
-        attribution_event_type=(source_event.event_type if source_event else data.get("event_type", ""))[:20],
+        email=(
+            getattr(user, "email", "") or (source_event.email if source_event else "")
+        )[:254],
+        attribution_event_type=(
+            source_event.event_type if source_event else data.get("event_type", "")
+        )[:20],
         attribution_source_url=(source_event.source_url if source_event else "")[:300],
         referrer=request.META.get("HTTP_REFERER", "")[:300],
         metadata={"source": "learner_registration"},
@@ -64,7 +83,6 @@ class LearnerRegistrationView(CreateView):
         _track_signup_resource_conversion(self.request, self.object)
         messages.success(self.request, "Your learner account is ready.")
         return response
-
 
 
 class LearnerProfileView(UpdateView):

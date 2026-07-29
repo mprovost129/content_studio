@@ -39,22 +39,22 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     objects = UserManager()
 
-    USERNAME_FIELD = 'email'
+    USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
 
     class Meta:
-        verbose_name = 'user'
-        verbose_name_plural = 'users'
+        verbose_name = "user"
+        verbose_name_plural = "users"
 
     def get_full_name(self):
-        return f'{self.first_name} {self.last_name}'.strip()
+        return f"{self.first_name} {self.last_name}".strip()
 
     def get_short_name(self):
-        return self.display_name or self.first_name or self.email.split('@')[0]
+        return self.display_name or self.first_name or self.email.split("@")[0]
 
     @property
     def learner_name(self):
-        return self.display_name or self.get_full_name() or self.email.split('@')[0]
+        return self.display_name or self.get_full_name() or self.email.split("@")[0]
 
     def __str__(self):
         return self.email

@@ -16,7 +16,7 @@ class ResourceIdeaDraft:
     category: Category | None = None
     related_lessons: list[Lesson] | None = None
     featured: bool = False
-    created_by = None
+    created_by: object | None = None
 
 
 def _clean(value: str, fallback: str) -> str:
@@ -26,41 +26,75 @@ def _clean(value: str, fallback: str) -> str:
 
 def _title_case(value: str) -> str:
     cleaned = _clean(value, "Python basics")
-    small_words = {"a", "an", "and", "as", "at", "but", "for", "in", "of", "on", "or", "the", "to", "with"}
+    small_words = {
+        "a",
+        "an",
+        "and",
+        "as",
+        "at",
+        "but",
+        "for",
+        "in",
+        "of",
+        "on",
+        "or",
+        "the",
+        "to",
+        "with",
+    }
     words = []
     for index, word in enumerate(cleaned.split()):
         lowered = word.lower()
-        words.append(lowered if index and lowered in small_words else word[:1].upper() + word[1:])
+        words.append(
+            lowered if index and lowered in small_words else word[:1].upper() + word[1:]
+        )
     return " ".join(words)
 
 
 def _is_money_topic(topic: str) -> bool:
     lowered = topic.lower()
-    return any(word in lowered for word in ("money", "price", "cost", "budget", "sale", "tax", "tip", "discount", "dollar", "total"))
+    return any(
+        word in lowered
+        for word in (
+            "money",
+            "price",
+            "cost",
+            "budget",
+            "sale",
+            "tax",
+            "tip",
+            "discount",
+            "dollar",
+            "total",
+        )
+    )
 
 
 def _code_example(topic: str) -> tuple[str, str]:
     lowered = topic.lower()
     if _is_money_topic(topic):
         return (
-            "price = 19.99\nquantity = 2\ntotal = price * quantity\nprint(f\"Total: ${total:.2f}\")",
+            'price = 19.99\nquantity = 2\ntotal = price * quantity\nprint(f"Total: ${total:.2f}")',
             "Total: $39.98",
         )
     if "list" in lowered:
         return (
-            "tasks = [\"read\", \"code\", \"practice\"]\nprint(tasks[0])\nprint(len(tasks))",
+            'tasks = ["read", "code", "practice"]\nprint(tasks[0])\nprint(len(tasks))',
             "read\n3",
         )
     if "loop" in lowered:
         return ("for number in range(1, 4):\n    print(number)", "1\n2\n3")
     if "function" in lowered:
         return (
-            "def greet(name):\n    return f\"Hello, {name}!\"\n\nprint(greet(\"Michael\"))",
+            'def greet(name):\n    return f"Hello, {name}!"\n\nprint(greet("Michael"))',
             "Hello, Michael!",
         )
     if "error" in lowered or "nameerror" in lowered:
-        return ("first_name = \"Michael\"\nprint(first_name)", "Michael")
-    return ("message = \"Python makes more sense one step at a time.\"\nprint(message)", "Python makes more sense one step at a time.")
+        return ('first_name = "Michael"\nprint(first_name)', "Michael")
+    return (
+        'message = "Python makes more sense one step at a time."\nprint(message)',
+        "Python makes more sense one step at a time.",
+    )
 
 
 def build_resource_outline(draft: ResourceIdeaDraft) -> dict:
@@ -98,8 +132,12 @@ Create the same kind of error on purpose, then fix it. That turns debugging from
 """
     elif resource_type == LearningResource.ResourceType.SETUP_GUIDE:
         title = f"{topic} Setup Guide for Beginners"
-        summary = f"A simple setup reference for {audience} getting ready to practice Python."
-        beginner_tip = "Do one setup step at a time and test it before moving to the next step."
+        summary = (
+            f"A simple setup reference for {audience} getting ready to practice Python."
+        )
+        beginner_tip = (
+            "Do one setup step at a time and test it before moving to the next step."
+        )
         content = f"""Before you start
 This guide keeps {topic.lower()} simple so beginners can get to practice faster.
 
@@ -242,7 +280,8 @@ Create your own example using a name, number, or value that means something to y
         "estimated_read_minutes": 5,
         "seo_title": title[:70],
         "seo_description": summary[:170],
-        "pdf_download_enabled": resource_type in {
+        "pdf_download_enabled": resource_type
+        in {
             LearningResource.ResourceType.CHEAT_SHEET,
             LearningResource.ResourceType.PRACTICE_REFERENCE,
             LearningResource.ResourceType.DOWNLOAD,

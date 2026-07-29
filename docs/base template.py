@@ -1,6 +1,7 @@
+import io
+
 import cairosvg
 from PIL import Image, ImageDraw, ImageFont
-import io
 
 SIZE = 1080
 cx, cy = SIZE // 2, SIZE // 2
@@ -35,44 +36,51 @@ PYTHON_SVG = """<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 </svg>"""
 
 # ── Standard colors ────────────────────────────────────────────────────────
-PY_BLUE    = (55, 118, 171)
-YELLOW     = (255, 212, 59)
+PY_BLUE = (55, 118, 171)
+YELLOW = (255, 212, 59)
 # Swap ACCENT_COL to change the post theme color
 ACCENT_COL = PY_BLUE  # e.g. (255,140,60) for orange, (180,120,255) for purple
+
 
 # ── Fonts ──────────────────────────────────────────────────────────────────
 def F(name, size):
     try:
         return ImageFont.truetype(f"/usr/share/fonts/truetype/dejavu/{name}.ttf", size)
-    except:
+    except OSError:
         return ImageFont.load_default()
+
 
 fuser = F("DejaVuSans-Bold", 38)
 
+
 # ── Helper functions ───────────────────────────────────────────────────────
 def glow_text(draw, x, y, text, font, fill, glow_col, spread=5):
-    for dx in range(-spread, spread+1, 2):
-        for dy in range(-spread, spread+1, 2):
+    for dx in range(-spread, spread + 1, 2):
+        for dy in range(-spread, spread + 1, 2):
             if dx or dy:
-                draw.text((x+dx, y+dy), text, font=font, fill=glow_col)
+                draw.text((x + dx, y + dy), text, font=font, fill=glow_col)
     draw.text((x, y), text, font=font, fill=fill)
+
 
 def centered_glow(draw, y, text, font, fill, glow_col, spread=5):
-    bb = draw.textbbox((0,0), text, font=font)
-    x = (SIZE - (bb[2]-bb[0])) // 2
+    bb = draw.textbbox((0, 0), text, font=font)
+    x = (SIZE - (bb[2] - bb[0])) // 2
     glow_text(draw, x, y, text, font, fill, glow_col, spread)
 
+
 def centered(draw, y, text, font, fill):
-    bb = draw.textbbox((0,0), text, font=font)
-    x = (SIZE - (bb[2]-bb[0])) // 2
+    bb = draw.textbbox((0, 0), text, font=font)
+    x = (SIZE - (bb[2] - bb[0])) // 2
     draw.text((x, y), text, font=font, fill=fill)
+
 
 def code_line(draw, x, y, segments, font):
     lx = x
     for text, col in segments:
         draw.text((lx, y), text, font=font, fill=col)
-        bb = draw.textbbox((0,0), text, font=font)
+        bb = draw.textbbox((0, 0), text, font=font)
         lx += bb[2] - bb[0]
+
 
 # ── Canvas ─────────────────────────────────────────────────────────────────
 canvas = Image.new("RGB", (SIZE, SIZE), (10, 12, 22))
@@ -81,24 +89,28 @@ d = ImageDraw.Draw(canvas)
 # Dark gradient background top to bottom
 for y in range(SIZE):
     t = y / SIZE
-    d.line([(0,y),(SIZE,y)], fill=(int(10+t*10), int(12+t*8), int(22+t*22)))
+    d.line(
+        [(0, y), (SIZE, y)], fill=(int(10 + t * 10), int(12 + t * 8), int(22 + t * 22))
+    )
 
 # Dot grid
 for gx in range(0, SIZE, 54):
     for gy in range(0, SIZE, 54):
-        d.ellipse([gx-1,gy-1,gx+1,gy+1], fill=(55,110,190))
+        d.ellipse([gx - 1, gy - 1, gx + 1, gy + 1], fill=(55, 110, 190))
 
 # ── Top accent bar (left third = accent, rest = PY_BLUE) ──────────────────
 d.rectangle([0, 0, SIZE, 9], fill=PY_BLUE)
-d.rectangle([0, 0, SIZE//3, 9], fill=ACCENT_COL)
+d.rectangle([0, 0, SIZE // 3, 9], fill=ACCENT_COL)
 
 # ── Bottom accent bar (right third = accent, rest = PY_BLUE) ──────────────
-d.rectangle([0, SIZE-9, SIZE, SIZE], fill=PY_BLUE)
-d.rectangle([SIZE*2//3, SIZE-9, SIZE, SIZE], fill=ACCENT_COL)
+d.rectangle([0, SIZE - 9, SIZE, SIZE], fill=PY_BLUE)
+d.rectangle([SIZE * 2 // 3, SIZE - 9, SIZE, SIZE], fill=ACCENT_COL)
 
 # ── Python logo top right ──────────────────────────────────────────────────
 lsz = 110
-svg_bytes = cairosvg.svg2png(bytestring=PYTHON_SVG.encode(), output_width=lsz, output_height=lsz)
+svg_bytes = cairosvg.svg2png(
+    bytestring=PYTHON_SVG.encode(), output_width=lsz, output_height=lsz
+)
 logo = Image.open(io.BytesIO(svg_bytes)).convert("RGBA")
 ca = canvas.convert("RGBA")
 ca.paste(logo, (SIZE - lsz - 48, 22), logo)
@@ -106,23 +118,28 @@ canvas = ca.convert("RGB")
 d = ImageDraw.Draw(canvas)
 
 # ── Vignette (dark edges, bright center) ──────────────────────────────────
-vig = Image.new("RGBA", (SIZE, SIZE), (0,0,0,0))
+vig = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
 vd = ImageDraw.Draw(vig)
-for r in range(SIZE//2, SIZE//3, -1):
-    t = (r - SIZE//3) / (SIZE//6)
-    a = int(min(1,t) * 80)
-    vd.ellipse([cx-r, cy-r, cx+r, cy+r], fill=(0,0,0,a))
+for r in range(SIZE // 2, SIZE // 3, -1):
+    t = (r - SIZE // 3) / (SIZE // 6)
+    a = int(min(1, t) * 80)
+    vd.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(0, 0, 0, a))
 
 # ── @code_with_michael username ────────────────────────────────────────────
 # Move this y value to position the username on the page
 username_y = SIZE - 120
-ub = d.textbbox((0,0), "@code_with_michael", font=fuser)
-ux = (SIZE - (ub[2]-ub[0])) // 2
-for dx in range(-3,4):
-    for dy in range(-3,4):
+ub = d.textbbox((0, 0), "@code_with_michael", font=fuser)
+ux = (SIZE - (ub[2] - ub[0])) // 2
+for dx in range(-3, 4):
+    for dy in range(-3, 4):
         if dx or dy:
-            d.text((ux+dx, username_y+dy), "@code_with_michael", font=fuser, fill=(0,80,170))
-d.text((ux, username_y), "@code_with_michael", font=fuser, fill=(100,175,255))
+            d.text(
+                (ux + dx, username_y + dy),
+                "@code_with_michael",
+                font=fuser,
+                fill=(0, 80, 170),
+            )
+d.text((ux, username_y), "@code_with_michael", font=fuser, fill=(100, 175, 255))
 
 # ── Composite vignette and save ────────────────────────────────────────────
 final = canvas.convert("RGBA")

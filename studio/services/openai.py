@@ -150,7 +150,9 @@ def generate_caption(lesson: Lesson, platform: str) -> CaptionDraft:
         reasoning_tokens = int(
             _nested_value(usage, "output_tokens_details", "reasoning_tokens")
         )
-        payload = response.model_dump(mode="json") if hasattr(response, "model_dump") else {}
+        payload = (
+            response.model_dump(mode="json") if hasattr(response, "model_dump") else {}
+        )
         generation.status = AIGeneration.Status.SUCCEEDED
         generation.response_id = getattr(response, "id", "")
         generation.response_text = response.output_text.strip()

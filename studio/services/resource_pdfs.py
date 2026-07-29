@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import re
 from io import BytesIO
-from typing import Iterable
-
-from django.utils import timezone
 
 
 def _split_markdownish_content(content: str) -> list[tuple[str, str]]:
@@ -24,7 +21,12 @@ def _split_markdownish_content(content: str) -> list[tuple[str, str]]:
     def flush_paragraph() -> None:
         nonlocal paragraph_lines
         if paragraph_lines:
-            blocks.append(("paragraph", " ".join(line.strip() for line in paragraph_lines if line.strip())))
+            blocks.append(
+                (
+                    "paragraph",
+                    " ".join(line.strip() for line in paragraph_lines if line.strip()),
+                )
+            )
             paragraph_lines = []
 
     for raw_line in (content or "").splitlines():
@@ -67,10 +69,7 @@ def _split_markdownish_content(content: str) -> list[tuple[str, str]]:
 
 def _escape(text: str) -> str:
     return (
-        str(text or "")
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
+        str(text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     )
 
 
@@ -94,14 +93,15 @@ def render_learning_resource_pdf(resource, *, site_url: str = "") -> bytes:
         from reportlab.platypus import (
             ListFlowable,
             ListItem,
-            PageBreak,
             Paragraph,
             Preformatted,
             SimpleDocTemplate,
             Spacer,
         )
     except ImportError as exc:  # pragma: no cover - dependency guard
-        raise RuntimeError("ReportLab is required for PDF generation. Install project requirements first.") from exc
+        raise RuntimeError(
+            "ReportLab is required for PDF generation. Install project requirements first."
+        ) from exc
 
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -113,7 +113,9 @@ def render_learning_resource_pdf(resource, *, site_url: str = "") -> bytes:
         bottomMargin=0.7 * inch,
         title=resource.title,
         author="Code with Michael",
-        subject=resource.summary[:180] if resource.summary else "Beginner Python resource",
+        subject=resource.summary[:180]
+        if resource.summary
+        else "Beginner Python resource",
     )
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
@@ -206,7 +208,10 @@ def render_learning_resource_pdf(resource, *, site_url: str = "") -> bytes:
         leftIndent=12,
         firstLineIndent=0,
     )
-    footer_note = resource.pdf_footer_note or "Practice the example, change one thing, and run it again."
+    footer_note = (
+        resource.pdf_footer_note
+        or "Practice the example, change one thing, and run it again."
+    )
 
     story = [
         Paragraph("CODE WITH MICHAEL - BEGINNER PYTHON RESOURCE", eyebrow_style),
@@ -227,7 +232,11 @@ def render_learning_resource_pdf(resource, *, site_url: str = "") -> bytes:
     if meta:
         story.append(Paragraph(_escape(meta), body_style))
     if resource.beginner_tip:
-        story.append(Paragraph(f"<b>Beginner tip:</b> {_escape(resource.beginner_tip)}", tip_style))
+        story.append(
+            Paragraph(
+                f"<b>Beginner tip:</b> {_escape(resource.beginner_tip)}", tip_style
+            )
+        )
 
     pending_bullets: list[str] = []
 
@@ -236,7 +245,10 @@ def render_learning_resource_pdf(resource, *, site_url: str = "") -> bytes:
         if pending_bullets:
             story.append(
                 ListFlowable(
-                    [ListItem(Paragraph(_escape(item), bullet_style), leftIndent=8) for item in pending_bullets],
+                    [
+                        ListItem(Paragraph(_escape(item), bullet_style), leftIndent=8)
+                        for item in pending_bullets
+                    ],
                     bulletType="bullet",
                     start="circle",
                     leftIndent=16,
@@ -262,7 +274,9 @@ def render_learning_resource_pdf(resource, *, site_url: str = "") -> bytes:
             pending_bullets.append(text)
     flush_bullets()
 
-    related = list(resource.related_lessons.filter(website_status__in=["ready", "published"])[:6])
+    related = list(
+        resource.related_lessons.filter(website_status__in=["ready", "published"])[:6]
+    )
     if related:
         story.append(Spacer(1, 10))
         story.append(Paragraph("Related lessons", h2_style))
@@ -272,17 +286,23 @@ def render_learning_resource_pdf(resource, *, site_url: str = "") -> bytes:
     story.append(Spacer(1, 14))
     story.append(Paragraph(_escape(footer_note), tip_style))
     if site_url:
-        story.append(Paragraph(_escape(f"More beginner Python lessons: {site_url}"), body_style))
+        story.append(
+            Paragraph(_escape(f"More beginner Python lessons: {site_url}"), body_style)
+        )
 
     def draw_footer(canvas, document):
         canvas.saveState()
         width, _height = letter
         canvas.setStrokeColor(colors.HexColor("#E2E8F0"))
-        canvas.line(document.leftMargin, 0.52 * inch, width - document.rightMargin, 0.52 * inch)
+        canvas.line(
+            document.leftMargin, 0.52 * inch, width - document.rightMargin, 0.52 * inch
+        )
         canvas.setFillColor(colors.HexColor("#64748B"))
         canvas.setFont("Helvetica", 8)
         canvas.drawString(document.leftMargin, 0.35 * inch, "Code with Michael")
-        canvas.drawRightString(width - document.rightMargin, 0.35 * inch, f"Page {document.page}")
+        canvas.drawRightString(
+            width - document.rightMargin, 0.35 * inch, f"Page {document.page}"
+        )
         canvas.restoreState()
 
     doc.build(story, onFirstPage=draw_footer, onLaterPages=draw_footer)

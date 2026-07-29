@@ -5,7 +5,7 @@ from studio.services.seo import absolute_url, rss_xml, sitemap_xml, website_sche
 
 
 class HomeView(TemplateView):
-    template_name = 'core/home.html'
+    template_name = "core/home.html"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -31,8 +31,12 @@ def robots_txt(request):
 
 
 def sitemap(request):
-    return HttpResponse(sitemap_xml(request=request), content_type="application/xml; charset=utf-8")
+    return HttpResponse(
+        sitemap_xml(request=request), content_type="application/xml; charset=utf-8"
+    )
 
 
 def feed(request):
-    return HttpResponse(rss_xml(request=request), content_type="application/rss+xml; charset=utf-8")
+    return HttpResponse(
+        rss_xml(request=request), content_type="application/rss+xml; charset=utf-8"
+    )

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from django.utils import timezone
 
-from studio.models import ExperimentDecisionTuning, ExperimentDecisionTuningChangeLog, RecommendationTuningChangeLog, RecommendationTuningExperimentSnapshot, ExperimentDecisionTuningExperimentSnapshot
+from studio.models import (
+    ExperimentDecisionTuning,
+    ExperimentDecisionTuningChangeLog,
+    ExperimentDecisionTuningExperimentSnapshot,
+    RecommendationTuningChangeLog,
+    RecommendationTuningExperimentSnapshot,
+)
 
 
 @dataclass(frozen=True)
@@ -86,7 +91,12 @@ METRIC_LABELS = {
 }
 
 
-def _change(snapshot: RecommendationTuningExperimentSnapshot | ExperimentDecisionTuningExperimentSnapshot, section: str, metric: str) -> float:
+def _change(
+    snapshot: RecommendationTuningExperimentSnapshot
+    | ExperimentDecisionTuningExperimentSnapshot,
+    section: str,
+    metric: str,
+) -> float:
     values = (snapshot.deltas or {}).get(section, {}).get(metric, {})
     raw = values.get("change")
     try:
@@ -106,7 +116,8 @@ def _metric_note(section: str, metric: str, change: float) -> str:
 
 
 def recommend_experiment_decision(
-    snapshot: RecommendationTuningExperimentSnapshot | ExperimentDecisionTuningExperimentSnapshot,
+    snapshot: RecommendationTuningExperimentSnapshot
+    | ExperimentDecisionTuningExperimentSnapshot,
     tuning: ExperimentDecisionTuning | None = None,
 ) -> DecisionRecommendation:
     """Return a deterministic keep/rollback/inconclusive recommendation for a snapshot."""
@@ -129,14 +140,20 @@ def recommend_experiment_decision(
             negatives.append(_metric_note(section, metric, change))
         score += contribution
         if change:
-            weighted_signals.append({
-                "section": SECTION_LABELS.get(section, section.title()),
-                "metric": METRIC_LABELS.get(metric, metric.replace("_", " ")),
-                "change": round(change, 4),
-                "weight": weight,
-                "contribution": round(contribution, 4),
-                "direction": "positive" if contribution > 0 else "negative" if contribution < 0 else "neutral",
-            })
+            weighted_signals.append(
+                {
+                    "section": SECTION_LABELS.get(section, section.title()),
+                    "metric": METRIC_LABELS.get(metric, metric.replace("_", " ")),
+                    "change": round(change, 4),
+                    "weight": weight,
+                    "contribution": round(contribution, 4),
+                    "direction": "positive"
+                    if contribution > 0
+                    else "negative"
+                    if contribution < 0
+                    else "neutral",
+                }
+            )
 
     for (section, metric), weight in tuning.negative_weight_items().items():
         change = _change(snapshot, section, metric)
@@ -149,19 +166,29 @@ def recommend_experiment_decision(
             positives.append(_metric_note(section, metric, change))
         score += contribution
         if change:
-            weighted_signals.append({
-                "section": SECTION_LABELS.get(section, section.title()),
-                "metric": METRIC_LABELS.get(metric, metric.replace("_", " ")),
-                "change": round(change, 4),
-                "weight": weight,
-                "contribution": round(contribution, 4),
-                "direction": "positive" if contribution > 0 else "negative" if contribution < 0 else "neutral",
-            })
+            weighted_signals.append(
+                {
+                    "section": SECTION_LABELS.get(section, section.title()),
+                    "metric": METRIC_LABELS.get(metric, metric.replace("_", " ")),
+                    "change": round(change, 4),
+                    "weight": weight,
+                    "contribution": round(contribution, 4),
+                    "direction": "positive"
+                    if contribution > 0
+                    else "negative"
+                    if contribution < 0
+                    else "neutral",
+                }
+            )
 
-    weighted_signals.sort(key=lambda item: abs(float(item.get("contribution") or 0)), reverse=True)
+    weighted_signals.sort(
+        key=lambda item: abs(float(item.get("contribution") or 0)), reverse=True
+    )
 
     if not positives and not negatives:
-        neutral_notes.append("No meaningful before/after movement was detected inside this snapshot window.")
+        neutral_notes.append(
+            "No meaningful before/after movement was detected inside this snapshot window."
+        )
 
     total_conversions = _change(snapshot, "conversions", "total_conversions")
     new_followers = _change(snapshot, "social", "new_followers")
@@ -169,10 +196,33 @@ def recommend_experiment_decision(
     resource_downloads = _change(snapshot, "resources", "pdf_downloads")
     newsletter_clicks = _change(snapshot, "newsletter", "clicks")
 
-    primary_positive_count = sum(1 for value in [total_conversions, new_followers, cta_clicks, resource_downloads, newsletter_clicks] if value > 0)
-    primary_negative_count = sum(1 for value in [total_conversions, new_followers, cta_clicks, resource_downloads, newsletter_clicks] if value < 0)
+    primary_positive_count = sum(
+        1
+        for value in [
+            total_conversions,
+            new_followers,
+            cta_clicks,
+            resource_downloads,
+            newsletter_clicks,
+        ]
+        if value > 0
+    )
+    primary_negative_count = sum(
+        1
+        for value in [
+            total_conversions,
+            new_followers,
+            cta_clicks,
+            resource_downloads,
+            newsletter_clicks,
+        ]
+        if value < 0
+    )
 
-    if score >= tuning.keep_score_threshold and primary_positive_count >= tuning.keep_primary_positive_min:
+    if (
+        score >= tuning.keep_score_threshold
+        and primary_positive_count >= tuning.keep_primary_positive_min
+    ):
         decision = "keep"
         label = "Keep changes"
         confidence = "High" if score >= tuning.keep_high_confidence_score else "Medium"
@@ -184,10 +234,15 @@ def recommend_experiment_decision(
             "Keep the current tuning profile active for another content cycle.",
             "Create a fresh snapshot after the next posting window to confirm the lift is repeatable.",
         ]
-    elif score <= tuning.rollback_score_threshold and primary_negative_count >= tuning.rollback_primary_negative_min:
+    elif (
+        score <= tuning.rollback_score_threshold
+        and primary_negative_count >= tuning.rollback_primary_negative_min
+    ):
         decision = "rollback"
         label = "Rollback recommended"
-        confidence = "High" if score <= tuning.rollback_high_confidence_score else "Medium"
+        confidence = (
+            "High" if score <= tuning.rollback_high_confidence_score else "Medium"
+        )
         recommended_status = RecommendationTuningChangeLog.ExperimentStatus.ROLLBACK
         recommended_outcome = RecommendationTuningChangeLog.ExperimentOutcome.NEGATIVE
         summary = "The after-window declined across multiple important signals, so the safer recommendation is to roll back or revise the tuning weights."
@@ -201,7 +256,9 @@ def recommend_experiment_decision(
         label = "Inconclusive"
         confidence = "Low" if abs(score) < tuning.low_confidence_abs_score else "Medium"
         recommended_status = RecommendationTuningChangeLog.ExperimentStatus.INCONCLUSIVE
-        recommended_outcome = RecommendationTuningChangeLog.ExperimentOutcome.INCONCLUSIVE
+        recommended_outcome = (
+            RecommendationTuningChangeLog.ExperimentOutcome.INCONCLUSIVE
+        )
         summary = "The snapshot does not show a strong enough signal to confidently keep or roll back the tuning change."
         next_steps = [
             "Extend the experiment window or create another snapshot after more posts and learner activity are recorded.",
@@ -226,7 +283,13 @@ def recommend_experiment_decision(
     )
 
 
-def apply_decision_to_change_log(*, snapshot: RecommendationTuningExperimentSnapshot | ExperimentDecisionTuningExperimentSnapshot, user=None, note: str = "") -> RecommendationTuningChangeLog:
+def apply_decision_to_change_log(
+    *,
+    snapshot: RecommendationTuningExperimentSnapshot
+    | ExperimentDecisionTuningExperimentSnapshot,
+    user=None,
+    note: str = "",
+) -> RecommendationTuningChangeLog:
     """Save the recommendation back to the change log as the recorded experiment outcome."""
     recommendation = recommend_experiment_decision(snapshot)
     change_log = snapshot.change_log
@@ -237,26 +300,33 @@ def apply_decision_to_change_log(*, snapshot: RecommendationTuningExperimentSnap
     if note:
         recommendation_note = f"{recommendation_note}\n\nStaff note: {note}"
     if change_log.experiment_notes:
-        change_log.experiment_notes = f"{change_log.experiment_notes}\n\n{recommendation_note}"
+        change_log.experiment_notes = (
+            f"{change_log.experiment_notes}\n\n{recommendation_note}"
+        )
     else:
         change_log.experiment_notes = recommendation_note
     change_log.experiment_status = recommendation.recommended_status
     change_log.experiment_outcome = recommendation.recommended_outcome
     change_log.outcome_recorded_at = timezone.now()
-    change_log.outcome_recorded_by = user if getattr(user, "is_authenticated", False) else None
-    change_log.save(update_fields=[
-        "experiment_status",
-        "experiment_outcome",
-        "experiment_notes",
-        "outcome_recorded_at",
-        "outcome_recorded_by",
-        "updated_at",
-    ])
+    change_log.outcome_recorded_by = (
+        user if getattr(user, "is_authenticated", False) else None
+    )
+    change_log.save(
+        update_fields=[
+            "experiment_status",
+            "experiment_outcome",
+            "experiment_notes",
+            "outcome_recorded_at",
+            "outcome_recorded_by",
+            "updated_at",
+        ]
+    )
     return change_log
 
 
-
-def apply_decision_to_decision_rule_change_log(*, snapshot: ExperimentDecisionTuningExperimentSnapshot, user=None, note: str = "") -> ExperimentDecisionTuningChangeLog:
+def apply_decision_to_decision_rule_change_log(
+    *, snapshot: ExperimentDecisionTuningExperimentSnapshot, user=None, note: str = ""
+) -> ExperimentDecisionTuningChangeLog:
     """Save a snapshot recommendation back to a decision-rule change log."""
     recommendation = recommend_experiment_decision(snapshot)
     change_log = snapshot.change_log
@@ -267,19 +337,25 @@ def apply_decision_to_decision_rule_change_log(*, snapshot: ExperimentDecisionTu
     if note:
         recommendation_note = f"{recommendation_note}\n\nStaff note: {note}"
     if change_log.experiment_notes:
-        change_log.experiment_notes = f"{change_log.experiment_notes}\n\n{recommendation_note}"
+        change_log.experiment_notes = (
+            f"{change_log.experiment_notes}\n\n{recommendation_note}"
+        )
     else:
         change_log.experiment_notes = recommendation_note
     change_log.experiment_status = recommendation.recommended_status
     change_log.experiment_outcome = recommendation.recommended_outcome
     change_log.outcome_recorded_at = timezone.now()
-    change_log.outcome_recorded_by = user if getattr(user, "is_authenticated", False) else None
-    change_log.save(update_fields=[
-        "experiment_status",
-        "experiment_outcome",
-        "experiment_notes",
-        "outcome_recorded_at",
-        "outcome_recorded_by",
-        "updated_at",
-    ])
+    change_log.outcome_recorded_by = (
+        user if getattr(user, "is_authenticated", False) else None
+    )
+    change_log.save(
+        update_fields=[
+            "experiment_status",
+            "experiment_outcome",
+            "experiment_notes",
+            "outcome_recorded_at",
+            "outcome_recorded_by",
+            "updated_at",
+        ]
+    )
     return change_log

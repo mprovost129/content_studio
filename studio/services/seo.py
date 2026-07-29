@@ -10,7 +10,10 @@ from django.utils import timezone
 from studio.models import LearningResource, Lesson, Series
 
 PUBLIC_STATUSES = [Lesson.Status.READY, Lesson.Status.PUBLISHED]
-PUBLIC_RESOURCE_STATUSES = [LearningResource.Status.READY, LearningResource.Status.PUBLISHED]
+PUBLIC_RESOURCE_STATUSES = [
+    LearningResource.Status.READY,
+    LearningResource.Status.PUBLISHED,
+]
 
 
 def site_origin(request=None):
@@ -42,7 +45,9 @@ def public_lessons():
 
 def public_series():
     return (
-        Series.objects.filter(is_active=True, lessons__website_status__in=PUBLIC_STATUSES)
+        Series.objects.filter(
+            is_active=True, lessons__website_status__in=PUBLIC_STATUSES
+        )
         .exclude(lessons__status=Lesson.Status.ARCHIVED)
         .distinct()
         .order_by("title")
@@ -103,7 +108,8 @@ def website_schema(request=None):
             "description": "Beginner-friendly Python lessons, runnable examples, quizzes, and practice challenges.",
             "potentialAction": {
                 "@type": "SearchAction",
-                "target": absolute_url(reverse("learn:lesson-list"), request=request) + "?q={search_term_string}",
+                "target": absolute_url(reverse("learn:lesson-list"), request=request)
+                + "?q={search_term_string}",
                 "query-input": "required name=search_term_string",
             },
         }
@@ -122,8 +128,12 @@ def lesson_schema(lesson, request=None):
         "isAccessibleForFree": True,
         "learningResourceType": "Lesson",
         "educationalLevel": lesson.get_difficulty_display(),
-        "teaches": lesson.learning_objective or lesson.beginner_takeaway or lesson.title,
-        "dateCreated": lesson.created_at.date().isoformat() if lesson.created_at else None,
+        "teaches": lesson.learning_objective
+        or lesson.beginner_takeaway
+        or lesson.title,
+        "dateCreated": lesson.created_at.date().isoformat()
+        if lesson.created_at
+        else None,
         "dateModified": lesson.updated_at.isoformat() if lesson.updated_at else None,
         "publisher": organization_schema(request=request),
         "author": organization_schema(request=request),
@@ -136,7 +146,9 @@ def lesson_schema(lesson, request=None):
         }
     if lesson.category_id:
         data["about"] = lesson.category.name
-    return json_ld({key: value for key, value in data.items() if value not in (None, "")})
+    return json_ld(
+        {key: value for key, value in data.items() if value not in (None, "")}
+    )
 
 
 def resource_schema(resource, request=None):
@@ -151,14 +163,20 @@ def resource_schema(resource, request=None):
         "isAccessibleForFree": True,
         "learningResourceType": resource.get_resource_type_display(),
         "educationalLevel": resource.get_difficulty_display(),
-        "dateCreated": resource.created_at.date().isoformat() if resource.created_at else None,
-        "dateModified": resource.updated_at.isoformat() if resource.updated_at else None,
+        "dateCreated": resource.created_at.date().isoformat()
+        if resource.created_at
+        else None,
+        "dateModified": resource.updated_at.isoformat()
+        if resource.updated_at
+        else None,
         "publisher": organization_schema(request=request),
         "author": organization_schema(request=request),
     }
     if resource.category_id:
         data["about"] = resource.category.name
-    return json_ld({key: value for key, value in data.items() if value not in (None, "")})
+    return json_ld(
+        {key: value for key, value in data.items() if value not in (None, "")}
+    )
 
 
 def series_schema(series, lessons, request=None):
@@ -167,7 +185,8 @@ def series_schema(series, lessons, request=None):
             "@context": "https://schema.org",
             "@type": "Course",
             "name": series.title,
-            "description": series.description or "A beginner-friendly Python learning path from Code with Michael.",
+            "description": series.description
+            or "A beginner-friendly Python learning path from Code with Michael.",
             "url": series_canonical_url(series, request=request),
             "provider": organization_schema(request=request),
             "hasPart": [
@@ -190,7 +209,9 @@ def sitemap_xml(request=None):
         node = SubElement(urlset, "url")
         SubElement(node, "loc").text = absolute_url(path, request=request)
         if lastmod:
-            SubElement(node, "lastmod").text = lastmod.date().isoformat() if hasattr(lastmod, "date") else str(lastmod)
+            SubElement(node, "lastmod").text = (
+                lastmod.date().isoformat() if hasattr(lastmod, "date") else str(lastmod)
+            )
         SubElement(node, "changefreq").text = changefreq
         SubElement(node, "priority").text = priority
 
@@ -205,15 +226,21 @@ def sitemap_xml(request=None):
     for resource in public_resources():
         add(resource_public_path(resource), resource.updated_at, "monthly", "0.7")
 
-    return b'<?xml version="1.0" encoding="UTF-8"?>\n' + tostring(urlset, encoding="utf-8")
+    return b'<?xml version="1.0" encoding="UTF-8"?>\n' + tostring(
+        urlset, encoding="utf-8"
+    )
 
 
 def rss_xml(request=None, limit=20):
     rss = Element("rss", version="2.0")
     channel = SubElement(rss, "channel")
     SubElement(channel, "title").text = "Code with Michael Python Lessons"
-    SubElement(channel, "link").text = absolute_url(reverse("learn:home"), request=request)
-    SubElement(channel, "description").text = "Beginner Python lessons, runnable code examples, quizzes, and practice challenges."
+    SubElement(channel, "link").text = absolute_url(
+        reverse("learn:home"), request=request
+    )
+    SubElement(
+        channel, "description"
+    ).text = "Beginner Python lessons, runnable code examples, quizzes, and practice challenges."
     SubElement(channel, "language").text = "en-us"
     SubElement(channel, "lastBuildDate").text = format_datetime(timezone.now())
 
@@ -224,7 +251,9 @@ def rss_xml(request=None, limit=20):
         SubElement(item, "link").text = url
         SubElement(item, "guid", isPermaLink="true").text = url
         SubElement(item, "description").text = lesson.seo_description or lesson.summary
-        SubElement(item, "pubDate").text = format_datetime(lesson.updated_at or timezone.now())
+        SubElement(item, "pubDate").text = format_datetime(
+            lesson.updated_at or timezone.now()
+        )
         if lesson.category_id:
             SubElement(item, "category").text = lesson.category.name
 

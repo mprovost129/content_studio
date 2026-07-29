@@ -3,51 +3,52 @@ import json
 from django import forms
 from django.utils import timezone
 
-from .services.recommendation_tuning_presets import PRESET_CHOICES
-from .services.experiment_decision_tuning_presets import DECISION_PRESET_CHOICES
-
 from .models import (
     BrandProfile,
     CaptionDraft,
-    CodeChallenge,
-    ChallengeTestCase,
     Category,
+    ChallengeTestCase,
+    CodeChallenge,
     ContentPlan,
+    ExperimentDecisionTuning,
+    ExperimentDecisionTuningChangeLog,
+    ExperimentDecisionTuningExperimentSnapshot,
+    ExperimentDecisionTuningSnapshotComparisonReport,
+    ExperimentDecisionTuningSnapshotComparisonReportTemplate,
     GraphicAsset,
     GraphicTemplate,
-    Lesson,
     LearningResource,
-    ResourceCTA,
+    Lesson,
+    LessonBlock,
+    NewsletterCampaign,
+    NewsletterMetricImport,
+    NewsletterSubscriber,
+    PublishingRecord,
+    QuizChoice,
+    QuizQuestion,
+    RecommendationTuning,
+    RecommendationTuningChangeLog,
     ReportTemplateRecommendationTuning,
     ReportTemplateRecommendationTuningChangeLog,
     ReportTemplateRecommendationTuningDecisionRules,
     ReportTemplateRecommendationTuningDecisionRulesChangeLog,
-    ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot,
-    ReportTemplateRecommendationTuningExperimentSnapshot,
-    RecommendationTuning,
-    ExperimentDecisionTuning,
-    ExperimentDecisionTuningChangeLog,
-    RecommendationTuningChangeLog,
-    RecommendationTuningExperimentSnapshot,
-    ExperimentDecisionTuningExperimentSnapshot,
-    ExperimentDecisionTuningSnapshotComparisonReport,
-    ExperimentDecisionTuningSnapshotComparisonReportTemplate,
-    LessonBlock,
-    NewsletterSubscriber,
-    NewsletterCampaign,
-    NewsletterMetricImport,
-    SubscriberSegment,
-    PublishingRecord,
-    QuizChoice,
-    QuizQuestion,
+    ResourceCTA,
     Series,
+    SubscriberSegment,
 )
+from .services.experiment_decision_tuning_presets import DECISION_PRESET_CHOICES
+from .services.recommendation_tuning_presets import PRESET_CHOICES
 
 
 class RecommendationTuningExperimentSnapshotForm(forms.Form):
     window_days = forms.TypedChoiceField(
         coerce=int,
-        choices=((7, "7 days before/after"), (14, "14 days before/after"), (30, "30 days before/after"), (60, "60 days before/after")),
+        choices=(
+            (7, "7 days before/after"),
+            (14, "14 days before/after"),
+            (30, "30 days before/after"),
+            (60, "60 days before/after"),
+        ),
         initial=14,
         label="Comparison window",
         help_text="The same number of days will be compared before and after the tuning change timestamp.",
@@ -70,19 +71,22 @@ class RecommendationTuningExperimentSnapshotForm(forms.Form):
                 field.widget.attrs.setdefault("class", "form-control")
 
 
-class ExperimentDecisionTuningExperimentSnapshotForm(RecommendationTuningExperimentSnapshotForm):
+class ExperimentDecisionTuningExperimentSnapshotForm(
+    RecommendationTuningExperimentSnapshotForm
+):
     """Same before/after window inputs, scoped to decision-rule experiments."""
 
 
-
-
-class ReportTemplateRecommendationTuningExperimentSnapshotForm(RecommendationTuningExperimentSnapshotForm):
+class ReportTemplateRecommendationTuningExperimentSnapshotForm(
+    RecommendationTuningExperimentSnapshotForm
+):
     """Same before/after window inputs, scoped to report-template recommendation tuning experiments."""
 
 
-class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshotForm(RecommendationTuningExperimentSnapshotForm):
+class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshotForm(
+    RecommendationTuningExperimentSnapshotForm
+):
     """Same before/after window inputs, scoped to report-template recommendation decision-rule experiments."""
-
 
 
 class StyledModelForm(forms.ModelForm):
@@ -95,7 +99,6 @@ class StyledModelForm(forms.ModelForm):
                 field.widget.attrs.setdefault("class", "form-select")
             else:
                 field.widget.attrs.setdefault("class", "form-control")
-
 
 
 class RecommendationTuningForm(StyledModelForm):
@@ -190,11 +193,10 @@ class RecommendationTuningForm(StyledModelForm):
         floor = cleaned.get("feedback_adjustment_floor")
         ceiling = cleaned.get("feedback_adjustment_ceiling")
         if floor is not None and ceiling is not None and floor > ceiling:
-            raise forms.ValidationError("Feedback adjustment floor must be less than or equal to the ceiling.")
+            raise forms.ValidationError(
+                "Feedback adjustment floor must be less than or equal to the ceiling."
+            )
         return cleaned
-
-
-
 
 
 class RecommendationTuningExperimentOutcomeForm(StyledModelForm):
@@ -215,7 +217,6 @@ class RecommendationTuningExperimentOutcomeForm(StyledModelForm):
             "experiment_outcome": "Record the result once enough performance data is available.",
             "experiment_notes": "Summarize what happened and the decision you made.",
         }
-
 
 
 class ExperimentDecisionTuningExperimentOutcomeForm(StyledModelForm):
@@ -266,7 +267,6 @@ class RecommendationTuningSimulationForm(forms.Form):
         self.fields["limit"].widget.attrs.setdefault("class", "form-control")
 
 
-
 class ExperimentDecisionTuningSimulationForm(forms.Form):
     snapshot = forms.ModelChoiceField(
         queryset=ExperimentDecisionTuningExperimentSnapshot.objects.none(),
@@ -284,7 +284,11 @@ class ExperimentDecisionTuningSimulationForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["snapshot"].queryset = ExperimentDecisionTuningExperimentSnapshot.objects.select_related("change_log").order_by("-generated_at", "-pk")
+        self.fields[
+            "snapshot"
+        ].queryset = ExperimentDecisionTuningExperimentSnapshot.objects.select_related(
+            "change_log"
+        ).order_by("-generated_at", "-pk")
         self.fields["snapshot"].widget.attrs.setdefault("class", "form-select")
 
 
@@ -306,14 +310,19 @@ class ExperimentDecisionTuningExperimentSnapshotComparisonForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["snapshots"].queryset = ExperimentDecisionTuningExperimentSnapshot.objects.select_related("change_log").order_by("-generated_at", "-pk")
+        self.fields[
+            "snapshots"
+        ].queryset = ExperimentDecisionTuningExperimentSnapshot.objects.select_related(
+            "change_log"
+        ).order_by("-generated_at", "-pk")
 
     def clean_snapshots(self):
         snapshots = list(self.cleaned_data.get("snapshots") or [])
         if len(snapshots) > 6:
-            raise forms.ValidationError("Choose no more than six snapshots for one comparison.")
+            raise forms.ValidationError(
+                "Choose no more than six snapshots for one comparison."
+            )
         return snapshots
-
 
 
 class ExperimentDecisionTuningSnapshotComparisonReportForm(StyledModelForm):
@@ -348,7 +357,11 @@ class ExperimentDecisionTuningSnapshotComparisonReportForm(StyledModelForm):
             "description": forms.Textarea(attrs={"rows": 3}),
             "snapshots": forms.CheckboxSelectMultiple,
             "notes": forms.Textarea(attrs={"rows": 4}),
-            "decision_summary": forms.TextInput(attrs={"placeholder": "Example: Keep these rules through the next two posting cycles."}),
+            "decision_summary": forms.TextInput(
+                attrs={
+                    "placeholder": "Example: Keep these rules through the next two posting cycles."
+                }
+            ),
             "decision_notes": forms.Textarea(attrs={"rows": 4}),
         }
         help_texts = {
@@ -361,20 +374,29 @@ class ExperimentDecisionTuningSnapshotComparisonReportForm(StyledModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["snapshots"].queryset = ExperimentDecisionTuningExperimentSnapshot.objects.select_related("change_log").order_by("-generated_at", "-pk")
+        self.fields[
+            "snapshots"
+        ].queryset = ExperimentDecisionTuningExperimentSnapshot.objects.select_related(
+            "change_log"
+        ).order_by("-generated_at", "-pk")
 
     def clean_snapshots(self):
         snapshots = list(self.cleaned_data.get("snapshots") or [])
         if len(snapshots) < 1:
-            raise forms.ValidationError("Choose at least one snapshot for this saved report.")
+            raise forms.ValidationError(
+                "Choose at least one snapshot for this saved report."
+            )
         if len(snapshots) > 6:
-            raise forms.ValidationError("Choose no more than six snapshots for one saved report.")
+            raise forms.ValidationError(
+                "Choose no more than six snapshots for one saved report."
+            )
         return snapshots
 
     def clean_decision_status(self):
-        return self.cleaned_data.get("decision_status") or ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED
-
-
+        return (
+            self.cleaned_data.get("decision_status")
+            or ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED
+        )
 
 
 class ExperimentDecisionTuningSnapshotComparisonReportTemplateForm(StyledModelForm):
@@ -422,7 +444,9 @@ class ExperimentDecisionTuningSnapshotComparisonReportTemplateForm(StyledModelFo
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self.instance and self.instance.pk:
-            self.fields["focus_areas_text"].initial = "\n".join(self.instance.focus_areas or [])
+            self.fields["focus_areas_text"].initial = "\n".join(
+                self.instance.focus_areas or []
+            )
 
     def clean_focus_areas_text(self):
         raw = self.cleaned_data.get("focus_areas_text", "")
@@ -431,14 +455,18 @@ class ExperimentDecisionTuningSnapshotComparisonReportTemplateForm(StyledModelFo
     def save(self, commit=True):
         instance = super().save(commit=False)
         instance.focus_areas = self.cleaned_data.get("focus_areas_text", [])
-        instance.default_preset_keys = list(self.cleaned_data.get("default_preset_keys") or [])
+        instance.default_preset_keys = list(
+            self.cleaned_data.get("default_preset_keys") or []
+        )
         if commit:
             instance.save()
             self.save_m2m()
         return instance
 
 
-class ExperimentDecisionTuningSnapshotComparisonReportFromTemplateForm(ExperimentDecisionTuningSnapshotComparisonReportForm):
+class ExperimentDecisionTuningSnapshotComparisonReportFromTemplateForm(
+    ExperimentDecisionTuningSnapshotComparisonReportForm
+):
     class Meta(ExperimentDecisionTuningSnapshotComparisonReportForm.Meta):
         fields = ExperimentDecisionTuningSnapshotComparisonReportForm.Meta.fields
 
@@ -446,9 +474,11 @@ class ExperimentDecisionTuningSnapshotComparisonReportFromTemplateForm(Experimen
         self.report_template = template
         super().__init__(*args, **kwargs)
         if template:
-            self.fields["notes"].help_text = "Template notes were copied in. Edit them for this specific report."
-
-
+            self.fields[
+                "notes"
+            ].help_text = (
+                "Template notes were copied in. Edit them for this specific report."
+            )
 
 
 class ExperimentDecisionTuningSnapshotComparisonReportCloneForm(forms.Form):
@@ -478,6 +508,7 @@ class ExperimentDecisionTuningSnapshotComparisonReportCloneForm(forms.Form):
                 field.widget.attrs.setdefault("class", "form-select")
             else:
                 field.widget.attrs.setdefault("class", "form-control")
+
 
 class ExperimentDecisionTuningForm(StyledModelForm):
     change_reason = forms.CharField(
@@ -557,11 +588,18 @@ class ExperimentDecisionTuningForm(StyledModelForm):
         rollback = cleaned.get("rollback_score_threshold")
         rollback_high = cleaned.get("rollback_high_confidence_score")
         if keep is not None and keep_high is not None and keep_high < keep:
-            raise forms.ValidationError("Keep high-confidence score must be greater than or equal to the keep threshold.")
-        if rollback is not None and rollback_high is not None and rollback_high > rollback:
-            raise forms.ValidationError("Rollback high-confidence score must be less than or equal to the rollback threshold.")
+            raise forms.ValidationError(
+                "Keep high-confidence score must be greater than or equal to the keep threshold."
+            )
+        if (
+            rollback is not None
+            and rollback_high is not None
+            and rollback_high > rollback
+        ):
+            raise forms.ValidationError(
+                "Rollback high-confidence score must be less than or equal to the rollback threshold."
+            )
         return cleaned
-
 
 
 class ReportTemplateRecommendationTuningForm(StyledModelForm):
@@ -593,15 +631,42 @@ class ReportTemplateRecommendationTuningForm(StyledModelForm):
     class Meta:
         model = ReportTemplateRecommendationTuning
         fields = (
-            "name", "is_active", "base_template_score", "high_priority_threshold", "medium_priority_threshold",
-            "matching_window_weight", "matching_window_cap",
-            "unused_template_bonus", "keep_decision_weight", "keep_decision_cap",
-            "watch_decision_weight", "watch_decision_cap", "rollback_decision_penalty", "rollback_decision_cap", "underused_family_bonus",
-            "focus_area_weight", "focus_area_cap", "preset_default_weight", "preset_default_cap",
-            "exact_useful_boost", "exact_useful_cap", "exact_dismissed_penalty", "exact_dismissed_cap",
-            "exact_revisit_boost", "exact_revisit_cap", "exact_ignored_penalty", "exact_ignored_cap",
-            "similar_useful_boost", "similar_useful_cap", "similar_dismissed_penalty", "similar_dismissed_cap",
-            "similar_revisit_boost", "similar_revisit_cap", "feedback_adjustment_floor", "feedback_adjustment_ceiling", "notes",
+            "name",
+            "is_active",
+            "base_template_score",
+            "high_priority_threshold",
+            "medium_priority_threshold",
+            "matching_window_weight",
+            "matching_window_cap",
+            "unused_template_bonus",
+            "keep_decision_weight",
+            "keep_decision_cap",
+            "watch_decision_weight",
+            "watch_decision_cap",
+            "rollback_decision_penalty",
+            "rollback_decision_cap",
+            "underused_family_bonus",
+            "focus_area_weight",
+            "focus_area_cap",
+            "preset_default_weight",
+            "preset_default_cap",
+            "exact_useful_boost",
+            "exact_useful_cap",
+            "exact_dismissed_penalty",
+            "exact_dismissed_cap",
+            "exact_revisit_boost",
+            "exact_revisit_cap",
+            "exact_ignored_penalty",
+            "exact_ignored_cap",
+            "similar_useful_boost",
+            "similar_useful_cap",
+            "similar_dismissed_penalty",
+            "similar_dismissed_cap",
+            "similar_revisit_boost",
+            "similar_revisit_cap",
+            "feedback_adjustment_floor",
+            "feedback_adjustment_ceiling",
+            "notes",
         )
         widgets = {"notes": forms.Textarea(attrs={"rows": 3})}
         help_texts = {
@@ -622,9 +687,13 @@ class ReportTemplateRecommendationTuningForm(StyledModelForm):
         floor = cleaned.get("feedback_adjustment_floor")
         ceiling = cleaned.get("feedback_adjustment_ceiling")
         if high is not None and medium is not None and high < medium:
-            raise forms.ValidationError("High-priority threshold must be greater than or equal to the medium-priority threshold.")
+            raise forms.ValidationError(
+                "High-priority threshold must be greater than or equal to the medium-priority threshold."
+            )
         if floor is not None and ceiling is not None and floor > ceiling:
-            raise forms.ValidationError("Feedback floor must be less than or equal to the feedback ceiling.")
+            raise forms.ValidationError(
+                "Feedback floor must be less than or equal to the feedback ceiling."
+            )
         return cleaned
 
 
@@ -721,15 +790,23 @@ class ReportTemplateRecommendationTuningDecisionRulesForm(StyledModelForm):
         rollback = cleaned.get("rollback_score_threshold")
         rollback_high = cleaned.get("rollback_high_confidence_score")
         if keep is not None and keep_high is not None and keep_high < keep:
-            raise forms.ValidationError("Keep high-confidence score must be greater than or equal to the keep threshold.")
-        if rollback is not None and rollback_high is not None and rollback_high > rollback:
-            raise forms.ValidationError("Rollback high-confidence score must be less than or equal to the rollback threshold.")
+            raise forms.ValidationError(
+                "Keep high-confidence score must be greater than or equal to the keep threshold."
+            )
+        if (
+            rollback is not None
+            and rollback_high is not None
+            and rollback_high > rollback
+        ):
+            raise forms.ValidationError(
+                "Rollback high-confidence score must be less than or equal to the rollback threshold."
+            )
         return cleaned
 
 
-
-
-class ReportTemplateRecommendationTuningDecisionRulesExperimentOutcomeForm(StyledModelForm):
+class ReportTemplateRecommendationTuningDecisionRulesExperimentOutcomeForm(
+    StyledModelForm
+):
     class Meta:
         model = ReportTemplateRecommendationTuningDecisionRulesChangeLog
         fields = (
@@ -752,7 +829,9 @@ class LessonIdeaForm(forms.Form):
         max_length=180,
         label="Lesson idea",
         help_text="Use a short beginner topic, such as Python variables, for loops, functions, lists, or calculating a total price.",
-        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "Python variables"}),
+        widget=forms.TextInput(
+            attrs={"class": "form-control", "placeholder": "Python variables"}
+        ),
     )
     audience = forms.CharField(
         max_length=180,
@@ -795,7 +874,9 @@ class LessonIdeaForm(forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["category"].queryset = Category.objects.order_by("name")
-        self.fields["series"].queryset = Series.objects.filter(is_active=True).order_by("title")
+        self.fields["series"].queryset = Series.objects.filter(is_active=True).order_by(
+            "title"
+        )
 
     def clean_topic(self):
         topic = " ".join(self.cleaned_data["topic"].split())
@@ -809,7 +890,9 @@ class ResourceIdeaForm(forms.Form):
         max_length=180,
         label="Resource idea",
         help_text="Use a short beginner topic, such as Python list cheat sheet, fixing NameError, setup VS Code, or calculating a total price.",
-        widget=forms.TextInput(attrs={"class": "form-control", "placeholder": "Python list cheat sheet"}),
+        widget=forms.TextInput(
+            attrs={"class": "form-control", "placeholder": "Python list cheat sheet"}
+        ),
     )
     resource_type = forms.ChoiceField(
         choices=LearningResource.ResourceType.choices,
@@ -846,7 +929,9 @@ class ResourceIdeaForm(forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["category"].queryset = Category.objects.order_by("name")
-        self.fields["related_lessons"].queryset = Lesson.objects.exclude(status=Lesson.Status.ARCHIVED).order_by("title")
+        self.fields["related_lessons"].queryset = Lesson.objects.exclude(
+            status=Lesson.Status.ARCHIVED
+        ).order_by("title")
 
     def clean_topic(self):
         topic = " ".join(self.cleaned_data["topic"].split())
@@ -856,7 +941,12 @@ class ResourceIdeaForm(forms.Form):
 
 
 class LessonForm(StyledModelForm):
-    OPTIONAL_WITH_DEFAULTS = ("facebook_status", "instagram_status", "threads_status", "website_status")
+    OPTIONAL_WITH_DEFAULTS = (
+        "facebook_status",
+        "instagram_status",
+        "threads_status",
+        "website_status",
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -907,9 +997,15 @@ class LessonForm(StyledModelForm):
             "summary": forms.Textarea(attrs={"rows": 3}),
             "common_mistake": forms.Textarea(attrs={"rows": 3}),
             "practice_prompt": forms.Textarea(attrs={"rows": 3}),
-            "starter_code": forms.Textarea(attrs={"rows": 8, "class": "form-control code-input"}),
-            "solution_code": forms.Textarea(attrs={"rows": 8, "class": "form-control code-input"}),
-            "expected_output": forms.Textarea(attrs={"rows": 4, "class": "form-control code-input"}),
+            "starter_code": forms.Textarea(
+                attrs={"rows": 8, "class": "form-control code-input"}
+            ),
+            "solution_code": forms.Textarea(
+                attrs={"rows": 8, "class": "form-control code-input"}
+            ),
+            "expected_output": forms.Textarea(
+                attrs={"rows": 4, "class": "form-control code-input"}
+            ),
             "internal_notes": forms.Textarea(attrs={"rows": 3}),
             "accent_color": forms.TextInput(attrs={"type": "color"}),
         }
@@ -965,7 +1061,6 @@ class LessonBlockForm(StyledModelForm):
             "data": "Optional structured details in JSON, such as quiz choices or an answer.",
         }
 
-
     def clean_data(self):
         value = self.cleaned_data.get("data")
         if value in (None, ""):
@@ -976,8 +1071,11 @@ class LessonBlockForm(StyledModelForm):
             except json.JSONDecodeError as exc:
                 raise forms.ValidationError(f"Enter valid JSON: {exc.msg}.") from exc
         if not isinstance(value, dict):
-            raise forms.ValidationError("Structured data must be a JSON object, such as {\"answer\": \"A\"}.")
+            raise forms.ValidationError(
+                'Structured data must be a JSON object, such as {"answer": "A"}.'
+            )
         return value
+
 
 class BlockTemplateApplyForm(forms.Form):
     template_key = forms.ChoiceField(
@@ -992,8 +1090,6 @@ class BlockTemplateApplyForm(forms.Form):
         from .services.block_templates import get_block_template_choices
 
         self.fields["template_key"].choices = get_block_template_choices()
-
-
 
 
 class SocialCarouselTemplateApplyForm(forms.Form):
@@ -1024,6 +1120,7 @@ class SocialCarouselTemplateApplyForm(forms.Form):
         from .services.social_carousels import get_social_carousel_template_choices
 
         self.fields["template_key"].choices = get_social_carousel_template_choices()
+
 
 class BrandProfileForm(StyledModelForm):
     class Meta:
@@ -1073,8 +1170,18 @@ class ResourceCTAForm(StyledModelForm):
         target_type = cleaned.get("target_type")
         target_lesson = cleaned.get("target_lesson")
         target_url = cleaned.get("target_url")
-        if target_type in {ResourceCTA.TargetType.LESSON, ResourceCTA.TargetType.QUIZ, ResourceCTA.TargetType.CHALLENGE} and not target_lesson:
-            raise forms.ValidationError("Choose a target lesson for lesson, quiz, and challenge CTA blocks.")
+        if (
+            target_type
+            in {
+                ResourceCTA.TargetType.LESSON,
+                ResourceCTA.TargetType.QUIZ,
+                ResourceCTA.TargetType.CHALLENGE,
+            }
+            and not target_lesson
+        ):
+            raise forms.ValidationError(
+                "Choose a target lesson for lesson, quiz, and challenge CTA blocks."
+            )
         if target_type == ResourceCTA.TargetType.EXTERNAL and not target_url:
             raise forms.ValidationError("Enter a target URL for external CTA blocks.")
         return cleaned
@@ -1109,7 +1216,9 @@ class LearningResourceForm(StyledModelForm):
         )
         widgets = {
             "summary": forms.Textarea(attrs={"rows": 3}),
-            "content": forms.Textarea(attrs={"rows": 16, "class": "form-control code-input"}),
+            "content": forms.Textarea(
+                attrs={"rows": 16, "class": "form-control code-input"}
+            ),
             "pdf_lead_magnet_description": forms.Textarea(attrs={"rows": 3}),
             "internal_notes": forms.Textarea(attrs={"rows": 4}),
         }
@@ -1155,7 +1264,8 @@ class CaptionDraftForm(StyledModelForm):
 
 class GraphicGenerationForm(forms.Form):
     template = forms.ModelChoiceField(
-        queryset=GraphicTemplate.objects.none(), widget=forms.Select(attrs={"class": "form-select"})
+        queryset=GraphicTemplate.objects.none(),
+        widget=forms.Select(attrs={"class": "form-select"}),
     )
     output_formats = forms.MultipleChoiceField(
         choices=GraphicAsset.Format.choices,
@@ -1165,7 +1275,9 @@ class GraphicGenerationForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["template"].queryset = GraphicTemplate.objects.filter(is_active=True)
+        self.fields["template"].queryset = GraphicTemplate.objects.filter(
+            is_active=True
+        )
 
 
 class QuizQuestionForm(StyledModelForm):
@@ -1210,9 +1322,15 @@ class CodeChallengeForm(StyledModelForm):
         )
         widgets = {
             "prompt": forms.Textarea(attrs={"rows": 4}),
-            "starter_code": forms.Textarea(attrs={"rows": 8, "class": "form-control code-input"}),
-            "solution_code": forms.Textarea(attrs={"rows": 8, "class": "form-control code-input"}),
-            "expected_output": forms.Textarea(attrs={"rows": 4, "class": "form-control code-input"}),
+            "starter_code": forms.Textarea(
+                attrs={"rows": 8, "class": "form-control code-input"}
+            ),
+            "solution_code": forms.Textarea(
+                attrs={"rows": 8, "class": "form-control code-input"}
+            ),
+            "expected_output": forms.Textarea(
+                attrs={"rows": 4, "class": "form-control code-input"}
+            ),
         }
         help_texts = {
             "position": "Controls where this challenge appears on the public lesson page.",
@@ -1223,15 +1341,25 @@ class CodeChallengeForm(StyledModelForm):
         }
 
 
-
 class ChallengeTestCaseForm(StyledModelForm):
     class Meta:
         model = ChallengeTestCase
-        fields = ("position", "name", "description", "test_code", "expected_output", "is_active")
+        fields = (
+            "position",
+            "name",
+            "description",
+            "test_code",
+            "expected_output",
+            "is_active",
+        )
         widgets = {
             "description": forms.Textarea(attrs={"rows": 3}),
-            "test_code": forms.Textarea(attrs={"rows": 8, "class": "form-control code-input"}),
-            "expected_output": forms.Textarea(attrs={"rows": 4, "class": "form-control code-input"}),
+            "test_code": forms.Textarea(
+                attrs={"rows": 8, "class": "form-control code-input"}
+            ),
+            "expected_output": forms.Textarea(
+                attrs={"rows": 4, "class": "form-control code-input"}
+            ),
         }
         help_texts = {
             "position": "Controls where this test runs in the challenge test list.",
@@ -1269,12 +1397,15 @@ class ContentPlanForm(StyledModelForm):
     def __init__(self, *args, lesson=None, **kwargs):
         super().__init__(*args, **kwargs)
         if lesson is not None:
-            self.fields["caption"].queryset = lesson.captions.order_by("platform", "-created_at")
-            self.fields["graphic"].queryset = lesson.assets.order_by("output_format", "slide_number", "-created_at")
+            self.fields["caption"].queryset = lesson.captions.order_by(
+                "platform", "-created_at"
+            )
+            self.fields["graphic"].queryset = lesson.assets.order_by(
+                "output_format", "slide_number", "-created_at"
+            )
         self.fields["caption"].required = False
         self.fields["graphic"].required = False
         self.fields["carousel_template"].required = False
-
 
 
 class PublishingRecordForm(StyledModelForm):
@@ -1319,8 +1450,12 @@ class PublishingRecordForm(StyledModelForm):
     def __init__(self, *args, lesson=None, **kwargs):
         super().__init__(*args, **kwargs)
         if lesson is not None:
-            self.fields["caption"].queryset = lesson.captions.order_by("platform", "-created_at")
-            self.fields["graphic"].queryset = lesson.assets.order_by("output_format", "slide_number", "-created_at")
+            self.fields["caption"].queryset = lesson.captions.order_by(
+                "platform", "-created_at"
+            )
+            self.fields["graphic"].queryset = lesson.assets.order_by(
+                "output_format", "slide_number", "-created_at"
+            )
         self.fields["caption"].required = False
         self.fields["graphic"].required = False
 
@@ -1347,7 +1482,9 @@ class NewsletterSignupForm(forms.ModelForm):
         fields = ("email", "first_name")
         widgets = {
             "email": forms.EmailInput(attrs={"placeholder": "you@example.com"}),
-            "first_name": forms.TextInput(attrs={"placeholder": "First name, optional"}),
+            "first_name": forms.TextInput(
+                attrs={"placeholder": "First name, optional"}
+            ),
         }
 
     def clean_email(self):
@@ -1389,7 +1526,9 @@ class SubscriberSegmentForm(StyledModelForm):
             "provider_notes": forms.Textarea(attrs={"rows": 3}),
             "subscribed_after": forms.DateInput(attrs={"type": "date"}),
             "subscribed_before": forms.DateInput(attrs={"type": "date"}),
-            "provider_last_synced_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "provider_last_synced_at": forms.DateTimeInput(
+                attrs={"type": "datetime-local"}
+            ),
         }
         help_texts = {
             "name": "Example: Brand new learners from lesson pages, Recent playground signups, or Beginner profiles.",
@@ -1410,7 +1549,9 @@ class SubscriberSegmentForm(StyledModelForm):
         after = cleaned.get("subscribed_after")
         before = cleaned.get("subscribed_before")
         if after and before and before < after:
-            self.add_error("subscribed_before", "End date must be after the start date.")
+            self.add_error(
+                "subscribed_before", "End date must be after the start date."
+            )
         return cleaned
 
 
@@ -1453,7 +1594,9 @@ class NewsletterCampaignForm(StyledModelForm):
             "provider_notes": forms.Textarea(attrs={"rows": 3}),
             "scheduled_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
             "sent_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
-            "provider_last_synced_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "provider_last_synced_at": forms.DateTimeInput(
+                attrs={"type": "datetime-local"}
+            ),
         }
         help_texts = {
             "lesson": "Optional lesson this email promotes or explains.",
@@ -1478,13 +1621,31 @@ class NewsletterCampaignForm(StyledModelForm):
         if lesson is not None:
             self.fields["lesson"].initial = lesson
             self.fields["lesson"].queryset = Lesson.objects.filter(pk=lesson.pk)
-            self.fields["content_plan"].queryset = lesson.content_plans.filter(platform=ContentPlan.Platform.EMAIL).order_by("-scheduled_at")
-            self.fields["publishing_record"].queryset = lesson.publishing_records.filter(platform=PublishingRecord.Platform.EMAIL).order_by("-published_at")
+            self.fields["content_plan"].queryset = lesson.content_plans.filter(
+                platform=ContentPlan.Platform.EMAIL
+            ).order_by("-scheduled_at")
+            self.fields[
+                "publishing_record"
+            ].queryset = lesson.publishing_records.filter(
+                platform=PublishingRecord.Platform.EMAIL
+            ).order_by("-published_at")
         else:
             self.fields["lesson"].queryset = Lesson.objects.order_by("title")
-            self.fields["content_plan"].queryset = ContentPlan.objects.filter(platform=ContentPlan.Platform.EMAIL).select_related("lesson").order_by("-scheduled_at")
-            self.fields["publishing_record"].queryset = PublishingRecord.objects.filter(platform=PublishingRecord.Platform.EMAIL).select_related("lesson").order_by("-published_at")
-        self.fields["saved_segment"].queryset = SubscriberSegment.objects.filter(is_active=True).order_by("name")
+            self.fields["content_plan"].queryset = (
+                ContentPlan.objects.filter(platform=ContentPlan.Platform.EMAIL)
+                .select_related("lesson")
+                .order_by("-scheduled_at")
+            )
+            self.fields["publishing_record"].queryset = (
+                PublishingRecord.objects.filter(
+                    platform=PublishingRecord.Platform.EMAIL
+                )
+                .select_related("lesson")
+                .order_by("-published_at")
+            )
+        self.fields["saved_segment"].queryset = SubscriberSegment.objects.filter(
+            is_active=True
+        ).order_by("name")
         self.fields["lesson"].required = False
         self.fields["content_plan"].required = False
         self.fields["publishing_record"].required = False
@@ -1496,7 +1657,9 @@ class NewsletterCampaignForm(StyledModelForm):
         scheduled_at = cleaned.get("scheduled_at")
         sent_at = cleaned.get("sent_at")
         if status == NewsletterCampaign.Status.SCHEDULED and not scheduled_at:
-            self.add_error("scheduled_at", "Scheduled campaigns need a scheduled date and time.")
+            self.add_error(
+                "scheduled_at", "Scheduled campaigns need a scheduled date and time."
+            )
         if status == NewsletterCampaign.Status.SENT and not sent_at:
             cleaned["sent_at"] = timezone.now()
         return cleaned
@@ -1515,7 +1678,12 @@ class NewsletterMetricImportForm(forms.Form):
     pasted_metrics = forms.CharField(
         required=False,
         label="Paste metrics",
-        widget=forms.Textarea(attrs={"rows": 9, "placeholder": "recipients,opens,clicks,unsubscribes,bounces\n421,212,38,1,0"}),
+        widget=forms.Textarea(
+            attrs={
+                "rows": 9,
+                "placeholder": "recipients,opens,clicks,unsubscribes,bounces\n421,212,38,1,0",
+            }
+        ),
         help_text="Paste a CSV row or key-value lines copied from your email platform.",
     )
     metrics_file = forms.FileField(
@@ -1536,7 +1704,9 @@ class NewsletterMetricImportForm(forms.Form):
 
     def __init__(self, *args, campaign=None, **kwargs):
         super().__init__(*args, **kwargs)
-        queryset = NewsletterCampaign.objects.select_related("lesson").order_by("-scheduled_at", "-created_at")
+        queryset = NewsletterCampaign.objects.select_related("lesson").order_by(
+            "-scheduled_at", "-created_at"
+        )
         if campaign is not None:
             queryset = NewsletterCampaign.objects.filter(pk=campaign.pk)
             self.fields["campaign"].initial = campaign
@@ -1602,7 +1772,9 @@ class NewsletterSubscriberForm(StyledModelForm):
             "notes": forms.Textarea(attrs={"rows": 4}),
             "consent_text": forms.Textarea(attrs={"rows": 2}),
             "provider_notes": forms.Textarea(attrs={"rows": 3}),
-            "provider_last_synced_at": forms.DateTimeInput(attrs={"type": "datetime-local"}),
+            "provider_last_synced_at": forms.DateTimeInput(
+                attrs={"type": "datetime-local"}
+            ),
         }
         help_texts = {
             "email": "Subscriber email address. Keep this unique.",

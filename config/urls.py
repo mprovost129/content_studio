@@ -4,15 +4,16 @@ from django.contrib import admin
 from django.urls import include, path
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('accounts/', include('users.urls')),
-    path('accounts/', include('django.contrib.auth.urls')),
-    path('learn/', include('learn_urls')),
-    path('studio/', include('studio.urls')),
-    path('', include('core.urls')),
+    path("admin/", admin.site.urls),
+    path("accounts/", include("users.urls")),
+    path("accounts/", include("django.contrib.auth.urls")),
+    path("learn/", include("learn_urls")),
+    path("studio/", include("studio.urls")),
+    path("", include("core.urls")),
 ]
 
 if settings.DEBUG:
     import debug_toolbar
-    urlpatterns = [path('__debug__/', include(debug_toolbar.urls))] + urlpatterns
+
+    urlpatterns = [path("__debug__/", include(debug_toolbar.urls))] + urlpatterns
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

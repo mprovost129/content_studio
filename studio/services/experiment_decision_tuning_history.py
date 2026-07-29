@@ -6,7 +6,6 @@ from typing import Any
 
 from studio.models import ExperimentDecisionTuning, ExperimentDecisionTuningChangeLog
 
-
 DECISION_TUNING_EXCLUDED_FIELDS = {"id", "created_at", "updated_at"}
 
 
@@ -23,7 +22,9 @@ def decision_tuning_snapshot(tuning: ExperimentDecisionTuning) -> dict[str, Any]
     return {name: getattr(tuning, name) for name in decision_tuning_field_names()}
 
 
-def build_decision_tuning_diff(before: dict[str, Any], after: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def build_decision_tuning_diff(
+    before: dict[str, Any], after: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
     diff: dict[str, dict[str, Any]] = {}
     keys = sorted(set(before.keys()) | set(after.keys()))
     for key in keys:
@@ -55,7 +56,9 @@ def create_decision_tuning_change_log(
     return ExperimentDecisionTuningChangeLog.objects.create(
         tuning=tuning,
         action=action,
-        changed_by=changed_by if getattr(changed_by, "is_authenticated", False) else None,
+        changed_by=changed_by
+        if getattr(changed_by, "is_authenticated", False)
+        else None,
         preset_key=preset_key,
         preset_name=preset_name,
         reason=reason,
@@ -64,7 +67,8 @@ def create_decision_tuning_change_log(
         diff=diff,
         request_path=request_path,
         experiment_label=experiment_label,
-        experiment_status=experiment_status or ExperimentDecisionTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+        experiment_status=experiment_status
+        or ExperimentDecisionTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
         experiment_notes=experiment_notes,
     )
 
@@ -91,6 +95,7 @@ def restore_decision_tuning_snapshot(
         before=before,
         action=ExperimentDecisionTuningChangeLog.Action.ROLLBACK_RESTORED,
         changed_by=changed_by,
-        reason=reason or f"Restored {snapshot}-change decision-rule snapshot from log #{source_log.pk}.",
+        reason=reason
+        or f"Restored {snapshot}-change decision-rule snapshot from log #{source_log.pk}.",
         request_path=request_path,
     )

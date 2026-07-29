@@ -5,7 +5,14 @@ from typing import Any
 
 from django.db.models import Max
 
-from studio.models import CodeChallenge, ChallengeTestCase, Lesson, LessonBlock, QuizChoice, QuizQuestion
+from studio.models import (
+    ChallengeTestCase,
+    CodeChallenge,
+    Lesson,
+    LessonBlock,
+    QuizChoice,
+    QuizQuestion,
+)
 
 
 @dataclass(frozen=True)
@@ -110,7 +117,7 @@ BLOCK_TEMPLATES: tuple[BlockTemplate, ...] = (
             BlockTemplateBlock(
                 LessonBlock.BlockType.CODE,
                 "Example code",
-                'price = 25\ntax = 2\ntotal = price + tax\nprint(total)',
+                "price = 25\ntax = 2\ntotal = price + tax\nprint(total)",
             ),
             BlockTemplateBlock(
                 LessonBlock.BlockType.OUTPUT,
@@ -142,7 +149,7 @@ BLOCK_TEMPLATES: tuple[BlockTemplate, ...] = (
                     BlockTemplateChallengeTest(
                         name="Expected output",
                         description="Checks that the submitted code prints the expected result.",
-                        test_code='',
+                        test_code="",
                         expected_output="Michael",
                     ),
                 ),
@@ -206,7 +213,7 @@ BLOCK_TEMPLATES: tuple[BlockTemplate, ...] = (
             BlockTemplateBlock(
                 LessonBlock.BlockType.CODE,
                 "Fixed code",
-                'age = 12\nnext_year = age + 1\nprint(next_year)',
+                "age = 12\nnext_year = age + 1\nprint(next_year)",
             ),
         ),
         quizzes=(
@@ -216,7 +223,9 @@ BLOCK_TEMPLATES: tuple[BlockTemplate, ...] = (
                 choices=(
                     BlockTemplateQuizChoice("The variable name was too short."),
                     BlockTemplateQuizChoice("Python cannot print numbers."),
-                    BlockTemplateQuizChoice("The code mixed a string and an integer.", True),
+                    BlockTemplateQuizChoice(
+                        "The code mixed a string and an integer.", True
+                    ),
                     BlockTemplateQuizChoice("The print function was missing."),
                 ),
             ),
@@ -252,7 +261,7 @@ BLOCK_TEMPLATES: tuple[BlockTemplate, ...] = (
                     BlockTemplateChallengeTest(
                         name="Prints total",
                         description="Checks that the learner prints the expected total.",
-                        test_code='',
+                        test_code="",
                         expected_output="25",
                     ),
                 ),
@@ -263,16 +272,23 @@ BLOCK_TEMPLATES: tuple[BlockTemplate, ...] = (
 
 
 def get_block_template_choices() -> list[tuple[str, str]]:
-    return [(template.key, f"{template.name} — {template.purpose}") for template in BLOCK_TEMPLATES]
+    return [
+        (template.key, f"{template.name} — {template.purpose}")
+        for template in BLOCK_TEMPLATES
+    ]
 
 
 def get_block_template(key: str) -> BlockTemplate | None:
     return next((template for template in BLOCK_TEMPLATES if template.key == key), None)
 
 
-def apply_block_template_to_lesson(lesson: Lesson, template: BlockTemplate) -> dict[str, int]:
+def apply_block_template_to_lesson(
+    lesson: Lesson, template: BlockTemplate
+) -> dict[str, int]:
     """Append a reusable teaching template to a lesson."""
-    next_block_position = (lesson.blocks.aggregate(maximum=Max("position"))["maximum"] or 0) + 1
+    next_block_position = (
+        lesson.blocks.aggregate(maximum=Max("position"))["maximum"] or 0
+    ) + 1
     blocks_created = 0
     for block in template.blocks:
         LessonBlock.objects.create(
@@ -286,7 +302,9 @@ def apply_block_template_to_lesson(lesson: Lesson, template: BlockTemplate) -> d
         next_block_position += 1
         blocks_created += 1
 
-    next_question_position = (lesson.quiz_questions.aggregate(maximum=Max("position"))["maximum"] or 0) + 1
+    next_question_position = (
+        lesson.quiz_questions.aggregate(maximum=Max("position"))["maximum"] or 0
+    ) + 1
     quizzes_created = 0
     choices_created = 0
     for quiz in template.quizzes:
@@ -309,7 +327,9 @@ def apply_block_template_to_lesson(lesson: Lesson, template: BlockTemplate) -> d
             )
             choices_created += 1
 
-    next_challenge_position = (lesson.code_challenges.aggregate(maximum=Max("position"))["maximum"] or 0) + 1
+    next_challenge_position = (
+        lesson.code_challenges.aggregate(maximum=Max("position"))["maximum"] or 0
+    ) + 1
     challenges_created = 0
     tests_created = 0
     for challenge_template in template.challenges:

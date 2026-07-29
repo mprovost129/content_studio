@@ -28,7 +28,6 @@ from studio.models import (
     ReportTemplateRecommendationTuningChangeLog,
     ReportTemplateRecommendationTuningDecisionRules,
     ReportTemplateRecommendationTuningDecisionRulesChangeLog,
-    ResourceCTA,
     ResourceLeadMagnetAccess,
     SubscriberSegment,
 )
@@ -64,7 +63,16 @@ def _safe_reverse(name: str, *args, **kwargs) -> str:
         return ""
 
 
-def _check(section: str, status: str, title: str, detail: str, *, action_label: str = "", action_url: str = "", count=None) -> HealthCheck:
+def _check(
+    section: str,
+    status: str,
+    title: str,
+    detail: str,
+    *,
+    action_label: str = "",
+    action_url: str = "",
+    count=None,
+) -> HealthCheck:
     return HealthCheck(
         section=section,
         status=status,
@@ -77,13 +85,25 @@ def _check(section: str, status: str, title: str, detail: str, *, action_label: 
 
 
 def _lesson_checks() -> list[HealthCheck]:
-    public_lessons = Lesson.objects.filter(website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED]).exclude(status=Lesson.Status.ARCHIVED)
-    draft_lessons = Lesson.objects.filter(status__in=[Lesson.Status.IDEA, Lesson.Status.DRAFT, Lesson.Status.REVIEW])
-    ready_without_website = Lesson.objects.filter(status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED]).exclude(website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED])
-    missing_learning_fields = Lesson.objects.exclude(status=Lesson.Status.ARCHIVED).filter(
-        Q(learning_objective="") | Q(beginner_takeaway="") | Q(practice_prompt="")
+    public_lessons = Lesson.objects.filter(
+        website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED]
+    ).exclude(status=Lesson.Status.ARCHIVED)
+    draft_lessons = Lesson.objects.filter(
+        status__in=[Lesson.Status.IDEA, Lesson.Status.DRAFT, Lesson.Status.REVIEW]
     )
-    published_without_blocks = Lesson.objects.filter(website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED]).annotate(block_count=Count("blocks")).filter(block_count=0)
+    ready_without_website = Lesson.objects.filter(
+        status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED]
+    ).exclude(website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED])
+    missing_learning_fields = Lesson.objects.exclude(
+        status=Lesson.Status.ARCHIVED
+    ).filter(Q(learning_objective="") | Q(beginner_takeaway="") | Q(practice_prompt=""))
+    published_without_blocks = (
+        Lesson.objects.filter(
+            website_status__in=[Lesson.Status.READY, Lesson.Status.PUBLISHED]
+        )
+        .annotate(block_count=Count("blocks"))
+        .filter(block_count=0)
+    )
 
     checks = [
         _check(
@@ -137,7 +157,9 @@ def _lesson_checks() -> list[HealthCheck]:
 
 def _challenge_checks() -> list[HealthCheck]:
     active = CodeChallenge.objects.filter(is_active=True)
-    no_tests_or_output = active.annotate(test_count=Count("test_cases", filter=Q(test_cases__is_active=True))).filter(test_count=0, expected_output="")
+    no_tests_or_output = active.annotate(
+        test_count=Count("test_cases", filter=Q(test_cases__is_active=True))
+    ).filter(test_count=0, expected_output="")
     no_solution = active.filter(solution_code="")
     return [
         _check(
@@ -171,11 +193,24 @@ def _challenge_checks() -> list[HealthCheck]:
 
 
 def _resource_checks() -> list[HealthCheck]:
-    public_resources = LearningResource.objects.filter(status__in=[LearningResource.Status.READY, LearningResource.Status.PUBLISHED])
-    gated = LearningResource.objects.filter(pdf_download_enabled=True, pdf_requires_email=True).exclude(status=LearningResource.Status.ARCHIVED)
-    gated_missing_copy = gated.filter(Q(pdf_lead_magnet_headline="") | Q(pdf_lead_magnet_description=""))
-    resources_without_cta = public_resources.annotate(cta_count=Count("ctas", filter=Q(ctas__is_active=True))).filter(cta_count=0)
-    downloads = ResourceLeadMagnetAccess.objects.aggregate(total=Sum("download_count")).get("total") or 0
+    public_resources = LearningResource.objects.filter(
+        status__in=[LearningResource.Status.READY, LearningResource.Status.PUBLISHED]
+    )
+    gated = LearningResource.objects.filter(
+        pdf_download_enabled=True, pdf_requires_email=True
+    ).exclude(status=LearningResource.Status.ARCHIVED)
+    gated_missing_copy = gated.filter(
+        Q(pdf_lead_magnet_headline="") | Q(pdf_lead_magnet_description="")
+    )
+    resources_without_cta = public_resources.annotate(
+        cta_count=Count("cta_blocks", filter=Q(cta_blocks__is_active=True))
+    ).filter(cta_count=0)
+    downloads = (
+        ResourceLeadMagnetAccess.objects.aggregate(total=Sum("download_count")).get(
+            "total"
+        )
+        or 0
+    )
     return [
         _check(
             "Resource library",
@@ -219,10 +254,18 @@ def _resource_checks() -> list[HealthCheck]:
 def _content_ops_checks() -> list[HealthCheck]:
     now = timezone.now()
     next_14 = now + timedelta(days=14)
-    upcoming = ContentPlan.objects.filter(scheduled_at__gte=now, scheduled_at__lte=next_14).exclude(status__in=[ContentPlan.Status.POSTED, ContentPlan.Status.SKIPPED])
-    overdue = ContentPlan.objects.filter(scheduled_at__lt=now).exclude(status__in=[ContentPlan.Status.POSTED, ContentPlan.Status.SKIPPED])
-    published_missing_url = PublishingRecord.objects.exclude(platform=PublishingRecord.Platform.WEBSITE).filter(post_url="")
-    published_missing_metrics = PublishingRecord.objects.filter(impressions=0, reach=0, likes=0, comments=0, saves=0, shares=0, clicks=0)
+    upcoming = ContentPlan.objects.filter(
+        scheduled_at__gte=now, scheduled_at__lte=next_14
+    ).exclude(status__in=[ContentPlan.Status.POSTED, ContentPlan.Status.SKIPPED])
+    overdue = ContentPlan.objects.filter(scheduled_at__lt=now).exclude(
+        status__in=[ContentPlan.Status.POSTED, ContentPlan.Status.SKIPPED]
+    )
+    published_missing_url = PublishingRecord.objects.exclude(
+        platform=PublishingRecord.Platform.WEBSITE
+    ).filter(post_url="")
+    published_missing_metrics = PublishingRecord.objects.filter(
+        impressions=0, reach=0, likes=0, comments=0, saves=0, shares=0, clicks=0
+    )
     return [
         _check(
             "Content operations",
@@ -264,11 +307,23 @@ def _content_ops_checks() -> list[HealthCheck]:
 
 
 def _newsletter_checks() -> list[HealthCheck]:
-    active_subscribers = NewsletterSubscriber.objects.filter(status=NewsletterSubscriber.Status.ACTIVE)
+    active_subscribers = NewsletterSubscriber.objects.filter(
+        status=NewsletterSubscriber.Status.ACTIVE
+    )
     segments = SubscriberSegment.objects.filter(is_active=True)
-    campaigns = NewsletterCampaign.objects.exclude(status=NewsletterCampaign.Status.ARCHIVED)
-    ready_without_schedule = campaigns.filter(status__in=[NewsletterCampaign.Status.READY, NewsletterCampaign.Status.SCHEDULED], scheduled_at__isnull=True)
-    sent_without_metrics = campaigns.filter(status=NewsletterCampaign.Status.SENT, actual_recipients=0, opens=0, clicks=0)
+    campaigns = NewsletterCampaign.objects.exclude(
+        status=NewsletterCampaign.Status.ARCHIVED
+    )
+    ready_without_schedule = campaigns.filter(
+        status__in=[
+            NewsletterCampaign.Status.READY,
+            NewsletterCampaign.Status.SCHEDULED,
+        ],
+        scheduled_at__isnull=True,
+    )
+    sent_without_metrics = campaigns.filter(
+        status=NewsletterCampaign.Status.SENT, actual_recipients=0, opens=0, clicks=0
+    )
     return [
         _check(
             "Newsletter",
@@ -311,10 +366,30 @@ def _newsletter_checks() -> list[HealthCheck]:
 
 def _recommendation_checks() -> list[HealthCheck]:
     active_profiles = [
-        ("CTA tuning", RecommendationTuning.objects.filter(is_active=True).count(), _safe_reverse("studio:recommendation-tuning")),
-        ("Decision rules", ExperimentDecisionTuning.objects.filter(is_active=True).count(), _safe_reverse("studio:experiment-decision-tuning")),
-        ("Template tuning", ReportTemplateRecommendationTuning.objects.filter(is_active=True).count(), _safe_reverse("studio:report-template-recommendation-tuning")),
-        ("Template decision rules", ReportTemplateRecommendationTuningDecisionRules.objects.filter(is_active=True).count(), _safe_reverse("studio:report-template-recommendation-tuning-decision-rules")),
+        (
+            "CTA tuning",
+            RecommendationTuning.objects.filter(is_active=True).count(),
+            _safe_reverse("studio:recommendation-tuning"),
+        ),
+        (
+            "Decision rules",
+            ExperimentDecisionTuning.objects.filter(is_active=True).count(),
+            _safe_reverse("studio:experiment-decision-tuning"),
+        ),
+        (
+            "Template tuning",
+            ReportTemplateRecommendationTuning.objects.filter(is_active=True).count(),
+            _safe_reverse("studio:report-template-recommendation-tuning"),
+        ),
+        (
+            "Template decision rules",
+            ReportTemplateRecommendationTuningDecisionRules.objects.filter(
+                is_active=True
+            ).count(),
+            _safe_reverse(
+                "studio:report-template-recommendation-tuning-decision-rules"
+            ),
+        ),
     ]
     checks = [
         _check(
@@ -329,40 +404,62 @@ def _recommendation_checks() -> list[HealthCheck]:
         for title, count, url in active_profiles
     ]
     open_experiments = (
-        RecommendationTuningChangeLog.objects.filter(experiment_status__in=["planned", "running"]).count()
-        + ExperimentDecisionTuningChangeLog.objects.filter(experiment_status__in=["planned", "running"]).count()
-        + ReportTemplateRecommendationTuningChangeLog.objects.filter(experiment_status__in=["planned", "running"]).count()
-        + ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.filter(experiment_status__in=["planned", "running"]).count()
+        RecommendationTuningChangeLog.objects.filter(
+            experiment_status__in=["planned", "running"]
+        ).count()
+        + ExperimentDecisionTuningChangeLog.objects.filter(
+            experiment_status__in=["planned", "running"]
+        ).count()
+        + ReportTemplateRecommendationTuningChangeLog.objects.filter(
+            experiment_status__in=["planned", "running"]
+        ).count()
+        + ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.filter(
+            experiment_status__in=["planned", "running"]
+        ).count()
     )
-    checks.append(_check(
-        "Recommendation system",
-        "info" if open_experiments else "good",
-        "Open recommendation experiments",
-        f"{open_experiments} recommendation or decision experiment(s) are currently planned/running.",
-        action_label="Tuning history",
-        action_url=_safe_reverse("studio:recommendation-tuning-history"),
-        count=open_experiments,
-    ))
-    reports_without_decision = ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(decision_status=ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED).count()
-    checks.append(_check(
-        "Recommendation system",
-        "watch" if reports_without_decision else "good",
-        "Saved comparison decisions",
-        f"{reports_without_decision} saved comparison report(s) still have no decision status.",
-        action_label="Saved comparisons",
-        action_url=_safe_reverse("studio:experiment-decision-tuning-snapshot-comparison-reports"),
-        count=reports_without_decision,
-    ))
-    templates = ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.filter(is_active=True).count()
-    checks.append(_check(
-        "Recommendation system",
-        "good" if templates else "watch",
-        "Active saved-report templates",
-        f"{templates} active comparison-report template(s) are available.",
-        action_label="Report templates",
-        action_url=_safe_reverse("studio:experiment-decision-tuning-snapshot-comparison-report-templates"),
-        count=templates,
-    ))
+    checks.append(
+        _check(
+            "Recommendation system",
+            "info" if open_experiments else "good",
+            "Open recommendation experiments",
+            f"{open_experiments} recommendation or decision experiment(s) are currently planned/running.",
+            action_label="Tuning history",
+            action_url=_safe_reverse("studio:recommendation-tuning-history"),
+            count=open_experiments,
+        )
+    )
+    reports_without_decision = ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(
+        decision_status=ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED
+    ).count()
+    checks.append(
+        _check(
+            "Recommendation system",
+            "watch" if reports_without_decision else "good",
+            "Saved comparison decisions",
+            f"{reports_without_decision} saved comparison report(s) still have no decision status.",
+            action_label="Saved comparisons",
+            action_url=_safe_reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-reports"
+            ),
+            count=reports_without_decision,
+        )
+    )
+    templates = ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.filter(
+        is_active=True
+    ).count()
+    checks.append(
+        _check(
+            "Recommendation system",
+            "good" if templates else "watch",
+            "Active saved-report templates",
+            f"{templates} active comparison-report template(s) are available.",
+            action_label="Report templates",
+            action_url=_safe_reverse(
+                "studio:experiment-decision-tuning-snapshot-comparison-report-templates"
+            ),
+            count=templates,
+        )
+    )
     return checks
 
 
@@ -377,7 +474,14 @@ def build_project_health_checks() -> list[HealthCheck]:
         _recommendation_checks,
     ):
         checks.extend(builder())
-    return sorted(checks, key=lambda check: (_STATUS_RANK.get(check.status, 9), check.section, check.title))
+    return sorted(
+        checks,
+        key=lambda check: (
+            _STATUS_RANK.get(check.status, 9),
+            check.section,
+            check.title,
+        ),
+    )
 
 
 def project_health_summary(checks: Iterable[HealthCheck]) -> dict[str, int]:
@@ -388,7 +492,9 @@ def project_health_summary(checks: Iterable[HealthCheck]) -> dict[str, int]:
     return summary
 
 
-def grouped_project_health(checks: Iterable[HealthCheck]) -> dict[str, list[HealthCheck]]:
+def grouped_project_health(
+    checks: Iterable[HealthCheck],
+) -> dict[str, list[HealthCheck]]:
     grouped: dict[str, list[HealthCheck]] = {}
     for check in checks:
         grouped.setdefault(check.section, []).append(check)
