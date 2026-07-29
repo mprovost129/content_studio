@@ -29,6 +29,7 @@
             {% if user.is_authenticated %}<a href="{% url 'learn:dashboard' %}"><i class="bi bi-graph-up"></i> My progress</a><a href="{% url 'learn:activity' %}"><i class="bi bi-clock-history"></i> Activity</a><a href="{% url 'users:profile' %}"><i class="bi bi-person-circle"></i> Profile</a>{% endif %}
             {% if user.is_authenticated and user.is_staff %}
             <a href="{% url 'studio:dashboard' %}"><i class="bi bi-grid"></i> Studio</a>
+            <a href="{% url 'studio:project-health' %}"><i class="bi bi-clipboard-check"></i> Health</a>
             <a href="{% url 'studio:lesson-generate' %}"><i class="bi bi-stars"></i> Generate</a>
             <a href="{% url 'studio:resource-list' %}"><i class="bi bi-file-earmark-text"></i> Resources</a>
             <a href="{% url 'studio:content-calendar' %}"><i class="bi bi-calendar-week"></i> Calendar</a>
@@ -49,6 +50,12 @@
             <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-templates' %}"><i class="bi bi-layout-text-window-reverse"></i> Report templates</a>
             <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}"><i class="bi bi-graph-up-arrow"></i> Template usage</a>
             <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations' %}"><i class="bi bi-lightbulb"></i> Template recommendations</a>
+            <a href="{% url 'studio:report-template-recommendation-tuning' %}"><i class="bi bi-sliders2"></i> Template tuning</a>
+            <a href="{% url 'studio:report-template-recommendation-tuning-history' %}"><i class="bi bi-clock-history"></i> Template tuning history</a>
+            <a href="{% url 'studio:report-template-recommendation-tuning-experiment-snapshots' %}"><i class="bi bi-bar-chart-line"></i> Template tuning snapshots</a>
+            <a href="{% url 'studio:report-template-recommendation-tuning-decision-rules' %}"><i class="bi bi-sliders"></i> Template decision rules</a>
+            <a href="{% url 'studio:report-template-recommendation-tuning-decision-rules-history' %}"><i class="bi bi-clock-history"></i> Template decision history</a>
+            <a href="{% url 'studio:report-template-recommendation-tuning-decision-rules-experiment-snapshots' %}"><i class="bi bi-bar-chart-line"></i> Template decision snapshots</a>
             <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback' %}"><i class="bi bi-hand-thumbs-up"></i> Template feedback</a>
             <a href="{% url 'studio:newsletter-campaign-list' %}"><i class="bi bi-envelope-paper"></i> Campaigns</a>
             <a href="{% url 'studio:subscriber-segment-list' %}"><i class="bi bi-diagram-3"></i> Segments</a>

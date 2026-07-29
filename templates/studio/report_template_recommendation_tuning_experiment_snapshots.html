@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Template-recommendation tuning snapshots{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">REPORT TEMPLATES</span>
+        <h1>Template-recommendation tuning snapshots</h1>
+        <p>Before/after snapshots for template-ranking experiments across template usage, saved reports, report decisions, and recommendation feedback.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-history' %}">Tuning history</a>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning' %}">Template tuning</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations' %}">Template recommendations</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-card"><span>Snapshots shown</span><strong>{{ snapshot_count }}</strong></div>
+    <div class="stat-card"><span>Latest snapshot</span><strong>{% if latest_snapshot %}{{ latest_snapshot.generated_at|date:"M j" }}{% else %}—{% endif %}</strong></div>
+</section>
+
+<section class="panel mt-4">
+    <form method="get" class="filter-bar">
+        <label>Experiment label
+            <input type="search" name="experiment_label" value="{{ selected_experiment_label }}" placeholder="Template ranking test">
+        </label>
+        <label>Window
+            <select name="window_days">
+                <option value="">All windows</option>
+                {% for days in window_choices %}<option value="{{ days }}"{% if selected_window_days == days|stringformat:"s" %} selected{% endif %}>{{ days }} days</option>{% endfor %}
+            </select>
+        </label>
+        <button class="btn btn-primary" type="submit">Filter</button>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-experiment-snapshots' %}">Reset</a>
+    </form>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Snapshots</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>Generated</th><th>Experiment</th><th>Window</th><th>Template reports</th><th>Saved reports</th><th>Keep decisions</th><th>Useful feedback</th><th></th></tr>
+            </thead>
+            <tbody>
+                {% for snapshot in snapshots %}
+                <tr>
+                    <td>{{ snapshot.generated_at|date:"M j, Y g:i A" }}</td>
+                    <td><strong>{{ snapshot.experiment_label }}</strong><br><small>{{ snapshot.change_log.created_at|date:"M j, Y g:i A" }}</small></td>
+                    <td>{{ snapshot.window_days }} days</td>
+                    <td>{{ snapshot.summary.primary_template_delta.change|default:"0" }}</td>
+                    <td>{{ snapshot.summary.primary_report_delta.change|default:"0" }}</td>
+                    <td>{{ snapshot.summary.primary_decision_delta.change|default:"0" }}</td>
+                    <td>{{ snapshot.summary.primary_feedback_delta.change|default:"0" }}</td>
+                    <td><a class="btn btn-secondary btn-sm" href="{% url 'studio:report-template-recommendation-tuning-experiment-snapshot-detail' snapshot.pk %}">Review</a></td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8">No report-template recommendation tuning snapshots have been created yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

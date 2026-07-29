@@ -10,6 +10,7 @@ from studio.models import (
     ExperimentDecisionTuningSnapshotComparisonReport,
     ExperimentDecisionTuningSnapshotComparisonReportTemplate,
     ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback,
+    ReportTemplateRecommendationTuning,
 )
 @dataclass
 class TemplateRecommendation:
@@ -22,12 +23,14 @@ class TemplateRecommendation:
     recommendation_key: str = ""
     feedback_adjustment: int = 0
     feedback_notes: list[str] = field(default_factory=list)
+    high_priority_threshold: int = 80
+    medium_priority_threshold: int = 55
 
     @property
     def priority(self) -> str:
-        if self.score >= 80:
+        if self.score >= self.high_priority_threshold:
             return "High"
-        if self.score >= 55:
+        if self.score >= self.medium_priority_threshold:
             return "Medium"
         return "Low"
 
@@ -40,7 +43,7 @@ def recommendation_key_for_template(template):
     return f"report-template:{template.pk}:type:{template.template_type}:window:{template.recommended_window_days}:snapshots:{template.recommended_snapshot_count}"
 
 
-def _feedback_score(template, recommendation_key):
+def _feedback_score(template, recommendation_key, tuning):
     """Return feedback adjustment and plain-English notes for a recommendation."""
     feedback = list(
         ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.objects.filter(
@@ -57,16 +60,16 @@ def _feedback_score(template, recommendation_key):
     ignored_count = sum(1 for item in exact if item.is_ignored_signal)
 
     if useful_count:
-        score += min(24, useful_count * 12)
+        score += min(tuning.exact_useful_cap, useful_count * tuning.exact_useful_boost)
         notes.append(f"Exact recommendation was marked useful {useful_count} time(s).")
     if dismissed_count:
-        score -= min(36, dismissed_count * 18)
+        score -= min(tuning.exact_dismissed_cap, dismissed_count * tuning.exact_dismissed_penalty)
         notes.append(f"Exact recommendation was dismissed {dismissed_count} time(s).")
     if revisit_count:
-        score += min(8, revisit_count * 4)
+        score += min(tuning.exact_revisit_cap, revisit_count * tuning.exact_revisit_boost)
         notes.append(f"Exact recommendation was marked revisit later {revisit_count} time(s).")
     if ignored_count:
-        score -= min(12, ignored_count * 4)
+        score -= min(tuning.exact_ignored_cap, ignored_count * tuning.exact_ignored_penalty)
         notes.append("This recommendation has been shown repeatedly without action.")
 
     type_feedback = [item for item in feedback if item.recommendation_key != recommendation_key]
@@ -74,16 +77,16 @@ def _feedback_score(template, recommendation_key):
     type_dismissed = sum(1 for item in type_feedback if item.status == item.Status.DISMISSED)
     type_revisit = sum(1 for item in type_feedback if item.status == item.Status.REVISIT)
     if type_useful:
-        score += min(10, type_useful * 3)
+        score += min(tuning.similar_useful_cap, type_useful * tuning.similar_useful_boost)
         notes.append("Similar recommendations for this template have been useful before.")
     if type_dismissed:
-        score -= min(14, type_dismissed * 4)
+        score -= min(tuning.similar_dismissed_cap, type_dismissed * tuning.similar_dismissed_penalty)
         notes.append("Similar recommendations for this template have been dismissed before.")
     if type_revisit:
-        score += min(6, type_revisit * 2)
+        score += min(tuning.similar_revisit_cap, type_revisit * tuning.similar_revisit_boost)
         notes.append("Similar recommendations were marked as worth revisiting.")
 
-    return max(-40, min(30, score)), notes[:4]
+    return max(tuning.feedback_adjustment_floor, min(tuning.feedback_adjustment_ceiling, score)), notes[:4]
 
 
 def record_template_recommendation_shown(recommendation, user=None):
@@ -150,7 +153,7 @@ def _change(snapshot, key):
         return 0
 
 
-def _snapshot_focus_score(template, snapshots):
+def _snapshot_focus_score(template, snapshots, tuning):
     """Score a template based on the type of recent snapshot movement available."""
     if not snapshots:
         return 0, ["No recent snapshots are available yet."]
@@ -162,7 +165,7 @@ def _snapshot_focus_score(template, snapshots):
     recent = snapshots[: max(1, template.recommended_snapshot_count or 1)]
     matching_window = [s for s in snapshots if s.window_days == template.recommended_window_days]
     if matching_window:
-        score += min(15, len(matching_window) * 5)
+        score += min(tuning.matching_window_cap, len(matching_window) * tuning.matching_window_weight)
         reasons.append(f"Has {len(matching_window)} recent snapshot(s) with the recommended {template.recommended_window_days}-day window.")
 
     totals = {
@@ -200,38 +203,39 @@ def _snapshot_focus_score(template, snapshots):
     return score, reasons
 
 
-def _usage_score(template, reports_for_template, all_rows):
+def _usage_score(template, reports_for_template, all_rows, tuning):
     score = 0
     reasons = []
     report_count = len(reports_for_template)
     if not report_count:
-        score += 18
+        score += tuning.unused_template_bonus
         reasons.append("This active template has not been used yet, so it is a good candidate for coverage.")
     else:
         keep_count = sum(1 for r in reports_for_template if r.decision_status == ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.KEEP)
         rollback_count = sum(1 for r in reports_for_template if r.decision_status == ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.ROLL_BACK)
         watch_count = sum(1 for r in reports_for_template if r.decision_status == ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.WATCH)
         if keep_count:
-            score += min(20, keep_count * 7)
+            score += min(tuning.keep_decision_cap, keep_count * tuning.keep_decision_weight)
             reasons.append(f"Prior reports from this template produced {keep_count} Keep decision(s).")
         if watch_count:
-            score += min(10, watch_count * 4)
+            score += min(tuning.watch_decision_cap, watch_count * tuning.watch_decision_weight)
             reasons.append(f"Prior reports produced {watch_count} Watch decision(s), suggesting this template is useful for follow-up.")
         if rollback_count:
-            score -= min(14, rollback_count * 5)
+            score -= min(tuning.rollback_decision_cap, rollback_count * tuning.rollback_decision_penalty)
             reasons.append(f"Prior reports produced {rollback_count} Roll back decision(s), so use this template more carefully.")
 
     type_report_counts = [row["total_reports"] for row in all_rows if row["template"].template_type == template.template_type]
     if type_report_counts:
         average_for_type = sum(type_report_counts) / len(type_report_counts)
         if report_count < average_for_type:
-            score += 8
+            score += tuning.underused_family_bonus
             reasons.append("This template is underused compared with others in the same family.")
     return score, reasons
 
 
-def build_report_template_recommendations(user=None, limit=8):
+def build_report_template_recommendations(user=None, limit=8, tuning=None):
     """Return ranked report-template recommendations for the next saved comparison report."""
+    tuning = tuning or ReportTemplateRecommendationTuning.get_active()
     templates = list(ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.filter(is_active=True).order_by("template_type", "title"))
     snapshots = list(
         ExperimentDecisionTuningExperimentSnapshot.objects.select_related("change_log")
@@ -254,25 +258,27 @@ def build_report_template_recommendations(user=None, limit=8):
 
     recommendations = []
     for template in templates:
-        score = 25
+        score = tuning.base_template_score
         score_parts = {"base": score}
         reasons = ["Active saved-report template is available."]
         template_reports = reports_by_template.get(template.pk, [])
 
-        focus_score, focus_reasons = _snapshot_focus_score(template, snapshots)
-        usage_score, usage_reasons = _usage_score(template, template_reports, usage_rows)
+        focus_score, focus_reasons = _snapshot_focus_score(template, snapshots, tuning)
+        usage_score, usage_reasons = _usage_score(template, template_reports, usage_rows, tuning)
         score += focus_score + usage_score
         score_parts.update({"snapshot_focus": focus_score, "usage_history": usage_score})
         reasons.extend(focus_reasons)
         reasons.extend(usage_reasons)
 
         if template.focus_areas:
-            score += min(8, len(template.focus_areas) * 2)
-            score_parts["focus_areas"] = min(8, len(template.focus_areas) * 2)
+            focus_area_score = min(tuning.focus_area_cap, len(template.focus_areas) * tuning.focus_area_weight)
+            score += focus_area_score
+            score_parts["focus_areas"] = focus_area_score
             reasons.append("Template includes defined focus areas for faster review.")
         if template.default_preset_keys:
-            score += min(7, len(template.default_preset_keys) * 3)
-            score_parts["preset_defaults"] = min(7, len(template.default_preset_keys) * 3)
+            preset_default_score = min(tuning.preset_default_cap, len(template.default_preset_keys) * tuning.preset_default_weight)
+            score += preset_default_score
+            score_parts["preset_defaults"] = preset_default_score
             reasons.append("Template already includes default decision-rule presets.")
 
         suggested = [s for s in snapshots if s.window_days == template.recommended_window_days]
@@ -281,7 +287,7 @@ def build_report_template_recommendations(user=None, limit=8):
         suggested = suggested[: max(1, template.recommended_snapshot_count or 1)]
 
         recommendation_key = recommendation_key_for_template(template)
-        feedback_adjustment, feedback_notes = _feedback_score(template, recommendation_key)
+        feedback_adjustment, feedback_notes = _feedback_score(template, recommendation_key, tuning)
         score += feedback_adjustment
         score_parts["feedback"] = feedback_adjustment
         display_reasons = reasons[:6]
@@ -298,6 +304,8 @@ def build_report_template_recommendations(user=None, limit=8):
             recommendation_key=recommendation_key,
             feedback_adjustment=feedback_adjustment,
             feedback_notes=feedback_notes,
+            high_priority_threshold=tuning.high_priority_threshold,
+            medium_priority_threshold=tuning.medium_priority_threshold,
         ))
 
     return sorted(recommendations, key=lambda item: (-item.score, item.template.get_template_type_display(), item.template.title))[:limit]

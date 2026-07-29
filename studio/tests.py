@@ -43,6 +43,12 @@ from .models import (
     ResourceLeadMagnetAccess,
     ResourceLessonConversionEvent,
     ResourcePerformanceEvent,
+    ReportTemplateRecommendationTuning,
+    ReportTemplateRecommendationTuningChangeLog,
+    ReportTemplateRecommendationTuningDecisionRules,
+    ReportTemplateRecommendationTuningDecisionRulesChangeLog,
+    ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot,
+    ReportTemplateRecommendationTuningExperimentSnapshot,
     SubscriberSegment,
     Tag,
     WebsiteExport,
@@ -2612,3 +2618,468 @@ class ExperimentDecisionTuningHistoryTests(TestCase):
         self.assertContains(export, "template_title")
         self.assertContains(export, "Lead Magnet Recommendation Test")
         self.assertContains(export, "lead-magnet activity")
+
+
+    def test_report_template_recommendation_tuning_screen_updates_weights(self):
+        self.client.force_login(self.user)
+        tuning = ReportTemplateRecommendationTuning.get_active()
+        response = self.client.get(reverse("studio:report-template-recommendation-tuning"))
+        self.assertContains(response, "Recommendation tuning")
+
+        post_data = {field.name: getattr(tuning, field.name) for field in tuning._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data["base_template_score"] = 40
+        post_data["high_priority_threshold"] = 90
+        post_data["medium_priority_threshold"] = 60
+        post_data["is_active"] = "on"
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning"), post_data)
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning"))
+        tuning.refresh_from_db()
+        self.assertEqual(tuning.base_template_score, 40)
+        self.assertEqual(tuning.high_priority_threshold, 90)
+
+    def test_report_template_recommendation_tuning_changes_scores(self):
+        template = ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.create(
+            title="Tuned Template",
+            slug="tuned-template",
+            template_type=ExperimentDecisionTuningSnapshotComparisonReportTemplate.TemplateType.MONTHLY_GROWTH,
+            recommended_snapshot_count=1,
+            recommended_window_days=14,
+            is_active=True,
+        )
+        before = next(item for item in build_report_template_recommendations(self.user, limit=20) if item.template == template)
+        tuning = ReportTemplateRecommendationTuning.get_active()
+        tuning.base_template_score = 5
+        tuning.unused_template_bonus = 0
+        tuning.save()
+        after = next(item for item in build_report_template_recommendations(self.user, limit=20) if item.template == template)
+        self.assertLess(after.score, before.score)
+
+
+    def test_report_template_recommendation_tuning_change_is_logged(self):
+        self.client.force_login(self.user)
+        tuning = ReportTemplateRecommendationTuning.get_active()
+        post_data = {field.name: getattr(tuning, field.name) for field in tuning._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data["base_template_score"] = tuning.base_template_score + 5
+        post_data["is_active"] = "on"
+        post_data["reason_note"] = "Testing template recommendation weights."
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning"), post_data)
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning"))
+        log = ReportTemplateRecommendationTuningChangeLog.objects.latest("created_at")
+        self.assertEqual(log.action, ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE)
+        self.assertIn("base_template_score", log.diff)
+        self.assertIn("Testing template recommendation weights", log.reason)
+
+    def test_report_template_recommendation_tuning_history_and_export(self):
+        self.client.force_login(self.user)
+        tuning = ReportTemplateRecommendationTuning.get_active()
+        ReportTemplateRecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.user,
+            before={"base_template_score": 25},
+            after={"base_template_score": 35},
+            diff={"base_template_score": {"before": 25, "after": 35}},
+            reason="Manual test change",
+            request_path="/studio/test/",
+        )
+        response = self.client.get(reverse("studio:report-template-recommendation-tuning-history"))
+        self.assertContains(response, "Template recommendation tuning audit log")
+        self.assertContains(response, "Manual test change")
+        export = self.client.get(reverse("studio:report-template-recommendation-tuning-history-export"))
+        self.assertContains(export, "changed_fields")
+        self.assertContains(export, "Manual test change")
+
+    def test_report_template_recommendation_tuning_rollback_restores_snapshot(self):
+        self.client.force_login(self.user)
+        tuning = ReportTemplateRecommendationTuning.get_active()
+        tuning.base_template_score = 50
+        tuning.save()
+        log = ReportTemplateRecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.user,
+            before={"name": tuning.name, "is_active": True, "base_template_score": 25},
+            after={"name": tuning.name, "is_active": True, "base_template_score": 50},
+            diff={"base_template_score": {"before": 25, "after": 50}},
+            reason="Experiment",
+        )
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning-rollback", args=[log.pk]), {"snapshot": "before", "rollback_reason": "Restore safer default"})
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-history"))
+        tuning.refresh_from_db()
+        self.assertEqual(tuning.base_template_score, 25)
+        self.assertEqual(ReportTemplateRecommendationTuningChangeLog.objects.filter(action=ReportTemplateRecommendationTuningChangeLog.Action.ROLLBACK_RESTORED).count(), 1)
+
+
+class ReportTemplateRecommendationTuningExperimentTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            email="template-experiment@example.com",
+            password="pass12345",
+            is_staff=True,
+        )
+
+    def test_manual_template_tuning_change_can_be_labeled_as_experiment(self):
+        self.client.force_login(self.user)
+        tuning = ReportTemplateRecommendationTuning.get_active()
+        post_data = {field.name: getattr(tuning, field.name) for field in tuning._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data["base_template_score"] = tuning.base_template_score + 3
+        post_data["is_active"] = "on"
+        post_data["reason_note"] = "Test whether lower template thresholds improve report usage."
+        post_data["experiment_label"] = "August template ranking test"
+        post_data["experiment_status"] = ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.RUNNING
+        post_data["experiment_notes"] = "Hypothesis: more recommended templates will create more saved reports."
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning"), post_data)
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning"))
+        log = ReportTemplateRecommendationTuningChangeLog.objects.latest("created_at")
+        self.assertEqual(log.experiment_label, "August template ranking test")
+        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.RUNNING)
+        self.assertIn("more recommended templates", log.experiment_notes)
+
+    def test_template_tuning_experiment_outcome_can_be_recorded(self):
+        self.client.force_login(self.user)
+        tuning = ReportTemplateRecommendationTuning.get_active()
+        log = ReportTemplateRecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.user,
+            before={"base_template_score": 25},
+            after={"base_template_score": 30},
+            diff={"base_template_score": {"before": 25, "after": 30}},
+            experiment_label="Template usage lift test",
+            experiment_status=ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning-experiment", args=[log.pk]), {
+            "experiment_label": "Template usage lift test",
+            "experiment_status": ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.KEEP,
+            "experiment_outcome": ReportTemplateRecommendationTuningChangeLog.ExperimentOutcome.POSITIVE,
+            "experiment_notes": "Template recommendations created more saved reports; keep this setting.",
+        })
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-history"))
+        log.refresh_from_db()
+        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.KEEP)
+        self.assertEqual(log.experiment_outcome, ReportTemplateRecommendationTuningChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertIsNotNone(log.outcome_recorded_at)
+        self.assertEqual(log.outcome_recorded_by, self.user)
+
+
+    def test_template_tuning_experiment_snapshot_can_be_created_and_exported(self):
+        self.client.force_login(self.user)
+        tuning = ReportTemplateRecommendationTuning.get_active()
+        log = ReportTemplateRecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.user,
+            before={"base_template_score": 25},
+            after={"base_template_score": 30},
+            diff={"base_template_score": {"before": 25, "after": 30}},
+            experiment_label="Template recommendation usage test",
+            experiment_status=ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-create", args=[log.pk]), {"window_days": 7, "notes": "Review template usage lift."})
+        snapshot = ReportTemplateRecommendationTuningExperimentSnapshot.objects.get()
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertEqual(snapshot.window_days, 7)
+        self.assertIn("template_usage", snapshot.deltas)
+        detail = self.client.get(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertContains(detail, "Template usage")
+        export = self.client.get(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-export", args=[snapshot.pk]))
+        self.assertContains(export, "Template recommendation usage test")
+        self.assertContains(export, "Reports created")
+
+    def test_template_tuning_snapshot_decision_recommendation_can_be_recorded(self):
+        self.client.force_login(self.user)
+        tuning = ReportTemplateRecommendationTuning.get_active()
+        log = ReportTemplateRecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.user,
+            before={"base_template_score": 25},
+            after={"base_template_score": 36},
+            diff={"base_template_score": {"before": 25, "after": 36}},
+            experiment_label="Template recommendation quality test",
+            experiment_status=ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.RUNNING,
+        )
+        now = timezone.now()
+        snapshot = ReportTemplateRecommendationTuningExperimentSnapshot.objects.create(
+            change_log=log,
+            window_days=14,
+            before_start=now - timedelta(days=14),
+            before_end=now,
+            after_start=now,
+            after_end=now + timedelta(days=14),
+            before_metrics={},
+            after_metrics={},
+            deltas={
+                "template_usage": {"reports_created": {"before": 1, "after": 4, "change": 3, "pct": 300}},
+                "saved_reports": {"reports_created": {"before": 1, "after": 5, "change": 4, "pct": 400}},
+                "decision_outcomes": {"keep_decisions": {"before": 0, "after": 2, "change": 2, "pct": None}},
+                "recommendation_feedback": {"useful_feedback": {"before": 0, "after": 3, "change": 3, "pct": None}},
+            },
+            summary={},
+            generated_by=self.user,
+        )
+        detail = self.client.get(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertContains(detail, "DECISION RECOMMENDATION")
+        self.assertContains(detail, "Keep changes")
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]), {
+            "action": "apply_template_recommendation_decision",
+            "decision_note": "Useful template recommendations increased.",
+        })
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        log.refresh_from_db()
+        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.KEEP)
+        self.assertEqual(log.experiment_outcome, ReportTemplateRecommendationTuningChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertIn("Useful template recommendations increased", log.experiment_notes)
+        self.assertEqual(log.outcome_recorded_by, self.user)
+
+
+
+class ReportTemplateRecommendationTuningDecisionRulesTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            email="template-rules@example.com",
+            password="pass12345",
+            is_staff=True,
+        )
+
+    def test_template_recommendation_decision_rules_can_be_updated(self):
+        self.client.force_login(self.user)
+        rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        post_data = {field.name: getattr(rules, field.name) for field in rules._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data["is_active"] = "on"
+        post_data["keep_score_threshold"] = 12
+        post_data["feedback_useful_weight"] = 6
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules"), post_data)
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules"))
+        rules.refresh_from_db()
+        self.assertEqual(rules.keep_score_threshold, 12)
+        self.assertEqual(rules.feedback_useful_weight, 6)
+
+    def test_stricter_template_rules_change_keep_to_watch(self):
+        self.client.force_login(self.user)
+        rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        rules.keep_score_threshold = 50
+        rules.keep_primary_positive_min = 3
+        rules.save()
+        tuning = ReportTemplateRecommendationTuning.get_active()
+        log = ReportTemplateRecommendationTuningChangeLog.objects.create(
+            tuning=tuning,
+            action=ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            experiment_label="Strict template decision test",
+        )
+        now = timezone.now()
+        snapshot = ReportTemplateRecommendationTuningExperimentSnapshot.objects.create(
+            change_log=log,
+            window_days=14,
+            before_start=now - timedelta(days=14),
+            before_end=now,
+            after_start=now,
+            after_end=now + timedelta(days=14),
+            deltas={
+                "template_usage": {"reports_created": {"before": 1, "after": 3, "change": 2}},
+                "recommendation_feedback": {"useful_feedback": {"before": 0, "after": 2, "change": 2}},
+            },
+        )
+        detail = self.client.get(reverse("studio:report-template-recommendation-tuning-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertContains(detail, "Keep watching")
+        self.assertContains(detail, "Strict template decision test")
+
+
+    def test_template_recommendation_decision_rules_update_is_logged(self):
+        self.client.force_login(self.user)
+        rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        post_data = {field.name: getattr(rules, field.name) for field in rules._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data["is_active"] = "on"
+        post_data["keep_score_threshold"] = 14
+        post_data["change_reason"] = "Testing stricter keep threshold."
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules"), post_data)
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules"))
+        log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.latest("created_at")
+        self.assertEqual(log.action, ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.MANUAL_UPDATE)
+        self.assertIn("keep_score_threshold", log.diff)
+        self.assertEqual(log.reason, "Testing stricter keep threshold.")
+
+    def test_template_recommendation_decision_rules_history_and_export(self):
+        self.client.force_login(self.user)
+        rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.create(
+            decision_rules=rules,
+            action=ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.user,
+            before={"keep_score_threshold": 8},
+            after={"keep_score_threshold": 12},
+            diff={"keep_score_threshold": {"before": 8, "after": 12}},
+            reason="Audit test",
+        )
+        history = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-history"))
+        self.assertContains(history, "Audit test")
+        export = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-history-export"))
+        self.assertEqual(export.status_code, 200)
+        self.assertIn("report_template_recommendation_decision_rule_history.csv", export["Content-Disposition"])
+        self.assertContains(export, "keep_score_threshold")
+
+    def test_template_recommendation_decision_rules_rollback_restores_snapshot(self):
+        self.client.force_login(self.user)
+        rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        rules.keep_score_threshold = 22
+        rules.save()
+        log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.create(
+            decision_rules=rules,
+            action=ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.user,
+            before={"name": rules.name, "is_active": True, "keep_score_threshold": 8},
+            after={"name": rules.name, "is_active": True, "keep_score_threshold": 22},
+            diff={"keep_score_threshold": {"before": 8, "after": 22}},
+        )
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules-rollback", args=[log.pk]), {"snapshot": "before", "rollback_reason": "Undo test"})
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules-history"))
+        rules.refresh_from_db()
+        self.assertEqual(rules.keep_score_threshold, 8)
+        self.assertEqual(ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.count(), 2)
+
+    def test_template_recommendation_decision_rules_experiment_fields_are_logged(self):
+        self.client.force_login(self.user)
+        rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        post_data = {field.name: getattr(rules, field.name) for field in rules._meta.fields if field.name not in {"id", "created_at", "updated_at"}}
+        post_data["is_active"] = "on"
+        post_data["keep_score_threshold"] = 16
+        post_data["change_reason"] = "Threshold experiment."
+        post_data["experiment_label"] = "September decision-rule test"
+        post_data["experiment_status"] = ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.RUNNING
+        post_data["experiment_notes"] = "Hypothesis: stricter keep rules reduce false positives."
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules"), post_data)
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules"))
+        log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.latest("created_at")
+        self.assertEqual(log.experiment_label, "September decision-rule test")
+        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.RUNNING)
+        self.assertIn("stricter keep rules", log.experiment_notes)
+
+    def test_template_recommendation_decision_rules_experiment_outcome_can_be_recorded(self):
+        self.client.force_login(self.user)
+        rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.create(
+            decision_rules=rules,
+            action=ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.user,
+            before={"keep_score_threshold": 8},
+            after={"keep_score_threshold": 16},
+            diff={"keep_score_threshold": {"before": 8, "after": 16}},
+            experiment_label="Decision threshold test",
+            experiment_status=ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.RUNNING,
+        )
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment", args=[log.pk]), {
+            "experiment_label": "Decision threshold test",
+            "experiment_status": ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.COMPLETE,
+            "experiment_outcome": ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.POSITIVE,
+            "experiment_notes": "Decision quality improved; keep the new thresholds.",
+        })
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules-history"))
+        log.refresh_from_db()
+        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.COMPLETE)
+        self.assertEqual(log.experiment_outcome, ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertEqual(log.outcome_recorded_by, self.user)
+
+
+    def test_template_recommendation_decision_rule_snapshot_can_be_created_and_exported(self):
+        self.client.force_login(self.user)
+        rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.create(
+            decision_rules=rules,
+            action=ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.user,
+            experiment_label="Decision-rule snapshot test",
+            experiment_status=ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.RUNNING,
+        )
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-create", args=[log.pk]), {
+            "window_days": 14,
+            "notes": "Compare before and after decision-rule thresholds.",
+        })
+        snapshot = ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot.objects.get(change_log=log)
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", args=[snapshot.pk]))
+        detail = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertContains(detail, "Decision-rule snapshot test")
+        self.assertContains(detail, "Template usage")
+        export = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-export", args=[snapshot.pk]))
+        self.assertEqual(export.status_code, 200)
+        self.assertContains(export, "Decision-rule snapshot test")
+
+
+    def test_template_recommendation_decision_rule_snapshot_recommendation_can_be_recorded(self):
+        self.client.force_login(self.user)
+        rules = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        log = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.create(
+            decision_rules=rules,
+            action=ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.user,
+            experiment_label="Decision-rule recommendation test",
+            experiment_status=ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.RUNNING,
+        )
+        now = timezone.now()
+        snapshot = ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot.objects.create(
+            change_log=log,
+            window_days=14,
+            before_start=now - timedelta(days=28),
+            before_end=now - timedelta(days=14),
+            after_start=now - timedelta(days=14),
+            after_end=now,
+            before_metrics={},
+            after_metrics={},
+            deltas={
+                "template_usage": {"reports_created": {"before": 1, "after": 4, "change": 3, "pct": 300}},
+                "decision_outcomes": {"keep_decisions": {"before": 0, "after": 2, "change": 2, "pct": None}},
+                "recommendation_feedback": {"useful_feedback": {"before": 1, "after": 5, "change": 4, "pct": 400}},
+            },
+            summary={"primary_template_delta": {"change": 3}, "primary_feedback_delta": {"change": 4}},
+            generated_by=self.user,
+        )
+        detail = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", args=[snapshot.pk]))
+        self.assertContains(detail, "DECISION RECOMMENDATION")
+        self.assertContains(detail, "Keep changes")
+        response = self.client.post(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", args=[snapshot.pk]), {
+            "action": "apply_template_decision_rule_snapshot_decision",
+            "decision_note": "Looks better.",
+        })
+        self.assertRedirects(response, reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", args=[snapshot.pk]))
+        log.refresh_from_db()
+        self.assertEqual(log.experiment_status, ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.KEEP)
+        self.assertEqual(log.experiment_outcome, ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.POSITIVE)
+        self.assertIn("Looks better", log.experiment_notes)
+        export = self.client.get(reverse("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-export", args=[snapshot.pk]))
+        self.assertContains(export, "decision_recommendation")
+
+
+class ProjectHealthTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.staff = User.objects.create_user(email="health@example.com", password="password", is_staff=True)
+        self.lesson = Lesson.objects.create(
+            title="Health Check Lesson",
+            summary="A beginner lesson used for project health tests.",
+            status=Lesson.Status.PUBLISHED,
+            website_status=Lesson.Status.PUBLISHED,
+            learning_objective="Understand a simple Python print statement.",
+            beginner_takeaway="Python can display text with print().",
+            practice_prompt="Print your own name.",
+        )
+        LessonBlock.objects.create(
+            lesson=self.lesson,
+            position=1,
+            block_type=LessonBlock.BlockType.TEXT,
+            content="Use print() to display text.",
+        )
+
+    def test_project_health_page_renders_for_staff(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("studio:project-health"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Project Health")
+        self.assertContains(response, "Public lesson inventory")
+        self.assertContains(response, "Challenge validation coverage")
+
+    def test_project_health_csv_export(self):
+        self.client.force_login(self.staff)
+        response = self.client.get(reverse("studio:project-health-export"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn("project-health", response["Content-Disposition"])
+        self.assertContains(response, "section,status,title,detail,count,action_label,action_url")

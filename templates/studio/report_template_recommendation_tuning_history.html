@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Template recommendation tuning history{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">REPORT TEMPLATE RECOMMENDATIONS</span>
+        <h1>Tuning change history</h1>
+        <p>Review audit entries for report-template recommendation scoring changes and rollback restores.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning' %}">Template tuning</a>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-experiment-snapshots' %}">Experiment snapshots</a>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-history-export' %}?action={{ selected_action }}">Export CSV</a>
+    </div>
+</section>
+
+<section class="stats-grid">
+    <div class="stat-card"><span>Total changes shown</span><strong>{{ total_changes }}</strong></div>
+    <div class="stat-card"><span>Latest change</span><strong>{% if latest_change %}{{ latest_change.created_at|date:"M j" }}{% else %}—{% endif %}</strong></div>
+    <div class="stat-card"><span>Active experiments</span><strong>{{ active_experiment_count }}</strong></div>
+</section>
+
+<section class="panel mt-4">
+    <form method="get" class="filter-bar">
+        <label>Action
+            <select name="action">
+                <option value="">All actions</option>
+                {% for value, label in actions %}<option value="{{ value }}"{% if selected_action == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>Status
+            <select name="experiment_status">
+                <option value="">All experiment statuses</option>
+                {% for value, label in experiment_statuses %}<option value="{{ value }}"{% if selected_experiment_status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>Outcome
+            <select name="experiment_outcome">
+                <option value="">All outcomes</option>
+                {% for value, label in experiment_outcomes %}<option value="{{ value }}"{% if selected_experiment_outcome == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+        </label>
+        <label>Experiment label
+            <input type="search" name="experiment_label" value="{{ selected_experiment_label }}" placeholder="August growth test">
+        </label>
+        <button class="btn btn-primary" type="submit">Filter</button>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-history' %}">Reset</a>
+    </form>
+</section>
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Template recommendation tuning audit log</h2></div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Action</th>
+                    <th>User</th>
+                    <th>Profile</th>
+                    <th>Changed fields</th>
+                    <th>Reason</th>
+                    <th>Experiment</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in change_logs %}
+                <tr>
+                    <td>{{ log.created_at|date:"M j, Y g:i A" }}</td>
+                    <td>{{ log.get_action_display }}</td>
+                    <td>{% if log.changed_by %}{{ log.changed_by.email }}{% else %}—{% endif %}</td>
+                    <td><strong>{{ log.tuning.name }}</strong></td>
+                    <td>
+                        <strong>{{ log.changed_field_count }}</strong>
+                        {% if log.diff %}
+                        <details><summary>View fields</summary>
+                            <ul class="compact-list">
+                                {% for field, values in log.diff.items %}
+                                <li><code>{{ field }}</code>: {{ values.before }} → {{ values.after }}</li>
+                                {% endfor %}
+                            </ul>
+                        </details>
+                        {% endif %}
+                    </td>
+                    <td>{% if log.reason %}{{ log.reason }}{% else %}<span class="text-muted">No reason entered</span>{% endif %}</td>
+                    <td>
+                        {% if log.is_experiment %}
+                            <strong>{{ log.experiment_label|default:"Unnamed experiment" }}</strong><br>
+                            <span class="text-muted">{{ log.get_experiment_status_display }} · {{ log.get_experiment_outcome_display }}</span>
+                        {% else %}
+                            <span class="text-muted">Not an experiment</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a class="btn btn-secondary btn-sm" href="{% url 'studio:report-template-recommendation-tuning-rollback' log.pk %}">Review restore</a>
+                        <a class="btn btn-secondary btn-sm" href="{% url 'studio:report-template-recommendation-tuning-experiment' log.pk %}">Record outcome</a>
+                        <a class="btn btn-secondary btn-sm" href="{% url 'studio:report-template-recommendation-tuning-experiment-snapshot-create' log.pk %}">Snapshot</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8">No report-template recommendation tuning changes have been recorded yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}

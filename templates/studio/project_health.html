@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Project Health{% endblock %}
+
+{% block content %}
+<div class="page-header d-flex flex-wrap justify-content-between align-items-start gap-3">
+    <div>
+        <p class="eyebrow">Studio operations</p>
+        <h1>Project Health</h1>
+        <p class="lead">A launch-readiness checklist for the Code with Michael learning platform, content workflow, resources, newsletter, and recommendation systems.</p>
+        <p class="text-muted small">Generated {{ generated_at|date:"M j, Y g:i A" }}</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="{% url 'studio:project-health-export' %}"><i class="bi bi-download"></i> Export CSV</a>
+        <a class="btn btn-primary" href="{% url 'studio:dashboard' %}">Studio dashboard</a>
+    </div>
+</div>
+
+<div class="metric-grid mb-4">
+    <div class="metric-card border-danger">
+        <span class="metric-label">Needs action</span>
+        <strong>{{ summary.action }}</strong>
+        <small>Fix before launch/review.</small>
+    </div>
+    <div class="metric-card border-warning">
+        <span class="metric-label">Watch</span>
+        <strong>{{ summary.watch }}</strong>
+        <small>Worth improving soon.</small>
+    </div>
+    <div class="metric-card border-success">
+        <span class="metric-label">Good</span>
+        <strong>{{ summary.good }}</strong>
+        <small>Currently healthy.</small>
+    </div>
+    <div class="metric-card border-info">
+        <span class="metric-label">Info</span>
+        <strong>{{ summary.info }}</strong>
+        <small>Useful operational context.</small>
+    </div>
+</div>
+
+{% for section, section_checks in grouped_checks.items %}
+<section class="content-card mb-4">
+    <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+        <h2 class="h4 mb-0">{{ section }}</h2>
+        <span class="badge text-bg-secondary">{{ section_checks|length }} checks</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>Status</th>
+                    <th>Check</th>
+                    <th>Details</th>
+                    <th class="text-end">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for check in section_checks %}
+                <tr>
+                    <td><span class="badge text-bg-{{ check.css_class }}">{{ check.status|title }}</span></td>
+                    <td>
+                        <strong>{{ check.title }}</strong>
+                        {% if check.count != None %}<div class="text-muted small">Count: {{ check.count }}</div>{% endif %}
+                    </td>
+                    <td>{{ check.detail }}</td>
+                    <td class="text-end">
+                        {% if check.action_url %}
+                        <a class="btn btn-sm btn-outline-primary" href="{{ check.action_url }}">{{ check.action_label|default:"Open" }}</a>
+                        {% else %}
+                        <span class="text-muted small">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% empty %}
+<div class="alert alert-info">No health checks were generated.</div>
+{% endfor %}
+
+<section class="content-card">
+    <h2 class="h4">Recommended use</h2>
+    <p>Run this page before deployment, before a public launch push, and once per week while building Code with Michael. Treat red items as blockers, yellow items as backlog cleanup, and green items as confirmed readiness.</p>
+</section>
+{% endblock %}

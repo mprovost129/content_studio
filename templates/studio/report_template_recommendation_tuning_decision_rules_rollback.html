@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Restore template decision rules{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">REPORT TEMPLATE RECOMMENDATIONS</span>
+        <h1>Restore decision-rule snapshot</h1>
+        <p>Compare the current active rules with the before/after snapshots from this change log before restoring.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules-history' %}">Back to history</a>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules' %}">Current rules</a>
+    </div>
+</section>
+
+<section class="panel mb-4">
+    <div class="row g-3">
+        <div class="col-md-3"><span class="eyebrow">Action</span><p>{{ change_log.get_action_display }}</p></div>
+        <div class="col-md-3"><span class="eyebrow">Date</span><p>{{ change_log.created_at|date:"M j, Y g:i A" }}</p></div>
+        <div class="col-md-3"><span class="eyebrow">Changed by</span><p>{{ change_log.changed_by.email|default:"—" }}</p></div>
+        <div class="col-md-3"><span class="eyebrow">Fields changed</span><p>{{ change_log.changed_field_count }}</p></div>
+    </div>
+    {% if change_log.reason %}<p><strong>Reason:</strong> {{ change_log.reason }}</p>{% endif %}
+</section>
+
+<section class="panel mb-4">
+    <h2>Snapshot comparison</h2>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead><tr><th>Field</th><th>Current active</th><th>Before change</th><th>After change</th></tr></thead>
+            <tbody>
+                {% for row in tracked_fields %}
+                <tr>
+                    <td><code>{{ row.name }}</code></td>
+                    <td>{{ row.active }}</td>
+                    <td>{{ row.before }}</td>
+                    <td>{{ row.after }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel">
+    <h2>Restore</h2>
+    <form method="post" class="row g-3">
+        {% csrf_token %}
+        <div class="col-md-4">
+            <label class="form-label" for="snapshot">Snapshot to restore</label>
+            <select class="form-select" id="snapshot" name="snapshot">
+                <option value="before">Before-change snapshot</option>
+                <option value="after">After-change snapshot</option>
+            </select>
+        </div>
+        <div class="col-md-8">
+            <label class="form-label" for="rollback_reason">Rollback reason</label>
+            <textarea class="form-control" id="rollback_reason" name="rollback_reason" rows="2" placeholder="Why are you restoring this rule profile?"></textarea>
+        </div>
+        <div class="col-12">
+            <button class="btn btn-danger" type="submit">Restore selected snapshot</button>
+            <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules-history' %}">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

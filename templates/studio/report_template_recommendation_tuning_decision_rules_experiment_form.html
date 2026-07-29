@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Template decision-rule experiment{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">REPORT TEMPLATE RECOMMENDATIONS</span>
+        <h1>Record decision-rule experiment outcome</h1>
+        <p>Track whether this Keep / Rollback / Watch threshold change should stay active, be watched longer, or be rolled back.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules-history' %}">Back to decision history</a>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules-rollback' change_log.pk %}">Review rollback</a>
+    </div>
+</section>
+
+<section class="panel mb-4">
+    <div class="panel-heading"><h2>Change summary</h2></div>
+    <div class="stats-grid">
+        <div class="stat-card"><span>Changed</span><strong>{{ change_log.created_at|date:"M j, Y" }}</strong></div>
+        <div class="stat-card"><span>Action</span><strong>{{ change_log.get_action_display }}</strong></div>
+        <div class="stat-card"><span>Changed fields</span><strong>{{ change_log.changed_field_count }}</strong></div>
+    </div>
+    {% if change_log.reason %}<p><strong>Original reason:</strong> {{ change_log.reason }}</p>{% endif %}
+</section>
+
+<form method="post" class="panel form-panel">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="row g-3">
+        {% for field in form %}
+        <div class="col-md-{% if field.name == 'experiment_notes' %}12{% else %}4{% endif %}">
+            <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+            {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+    <div class="form-actions mt-4">
+        <button class="btn btn-primary" type="submit">Save outcome</button>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules-history' %}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

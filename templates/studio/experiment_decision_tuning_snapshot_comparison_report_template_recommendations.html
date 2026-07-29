@@ -9,6 +9,7 @@
     </div>
     <div class="heading-actions">
         <a class="btn btn-primary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations-export' %}">Export CSV</a>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning' %}">Tuning controls</a>
         <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback' %}">Feedback history</a>
         <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}">Template usage</a>
         <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-templates' %}">Report templates</a>
@@ -20,6 +21,7 @@
     <div class="stat-card"><span>High priority</span><strong>{{ high_priority_count }}</strong></div>
     <div class="stat-card"><span>Medium priority</span><strong>{{ medium_priority_count }}</strong></div>
     <div class="stat-card"><span>Low priority</span><strong>{{ low_priority_count }}</strong></div>
+    <div class="stat-card"><span>Active tuning</span><strong>{{ active_tuning.name }}</strong></div>
 </section>
 
 <section class="panel mt-4">
@@ -108,6 +110,6 @@
 
 <section class="panel mt-4">
     <div class="panel-heading"><h2>How recommendations are ranked</h2></div>
-    <p>Studio combines recent snapshot availability, the template’s recommended window, prior report decisions, underused template families, focus areas, preset defaults, and your feedback. Mark a recommendation useful to boost similar suggestions, dismiss it to reduce future ranking, or mark it revisit later to keep it available without treating it as urgent.</p>
+    <p>Studio combines recent snapshot availability, the template’s recommended window, prior report decisions, underused template families, focus areas, preset defaults, and your feedback. The active tuning profile is <strong>{{ active_tuning.name }}</strong>; you can adjust its weights from the tuning controls page. Mark a recommendation useful to boost similar suggestions, dismiss it to reduce future ranking, or mark it revisit later to keep it available without treating it as urgent.</p>
 </section>
 {% endblock %}

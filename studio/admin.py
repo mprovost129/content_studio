@@ -22,6 +22,12 @@ from .models import (
     ResourceCTAClickEvent,
     ResourceCTARecommendationFeedback,
     ResourceLessonConversionEvent,
+    ReportTemplateRecommendationTuning,
+    ReportTemplateRecommendationTuningChangeLog,
+    ReportTemplateRecommendationTuningDecisionRules,
+    ReportTemplateRecommendationTuningDecisionRulesChangeLog,
+    ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot,
+    ReportTemplateRecommendationTuningExperimentSnapshot,
     RecommendationTuning,
     ExperimentDecisionTuning,
     ExperimentDecisionTuningChangeLog,
@@ -295,12 +301,88 @@ class ExperimentDecisionTuningSnapshotComparisonReportTemplateAdmin(admin.ModelA
         return obj.generated_reports.count()
 
 
+@admin.register(ReportTemplateRecommendationTuning)
+class ReportTemplateRecommendationTuningAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active", "base_template_score", "high_priority_threshold", "medium_priority_threshold", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("name", "notes")
+
+
+
+@admin.register(ReportTemplateRecommendationTuningDecisionRules)
+class ReportTemplateRecommendationTuningDecisionRulesAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "is_active",
+        "keep_score_threshold",
+        "rollback_score_threshold",
+        "low_confidence_abs_score",
+        "updated_at",
+    )
+    list_filter = ("is_active",)
+    search_fields = ("name", "notes")
+
+
+
+
+@admin.register(ReportTemplateRecommendationTuningChangeLog)
+class ReportTemplateRecommendationTuningChangeLogAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "action", "tuning", "changed_by", "changed_field_count", "experiment_status", "experiment_outcome", "reason")
+    list_filter = ("action", "experiment_status", "experiment_outcome", "created_at", "tuning")
+    search_fields = ("tuning__name", "reason", "experiment_label", "experiment_notes", "changed_by__email")
+    readonly_fields = ("created_at", "updated_at", "before", "after", "diff", "changed_field_count")
+
+    def changed_field_count(self, obj):
+        return obj.changed_field_count
+
+
+
+@admin.register(ReportTemplateRecommendationTuningExperimentSnapshot)
+class ReportTemplateRecommendationTuningExperimentSnapshotAdmin(admin.ModelAdmin):
+    list_display = ("experiment_label", "window_days", "generated_at", "generated_by")
+    list_filter = ("window_days", "generated_at")
+    search_fields = ("change_log__experiment_label", "notes", "generated_by__email")
+    readonly_fields = ("before_metrics", "after_metrics", "deltas", "summary", "generated_at", "created_at", "updated_at")
+
+    def experiment_label(self, obj):
+        return obj.experiment_label
+
+
 @admin.register(ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback)
 class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedbackAdmin(admin.ModelAdmin):
     list_display = ("template", "status", "times_shown", "score", "priority", "last_seen_at", "responded_at", "created_by")
     list_filter = ("status", "template__template_type", "priority", "last_seen_at", "responded_at")
     search_fields = ("template__title", "recommendation_key", "notes", "created_by__email", "updated_by__email")
     readonly_fields = ("first_seen_at", "last_seen_at", "responded_at", "created_at", "updated_at")
+
+@admin.register(ReportTemplateRecommendationTuningDecisionRulesChangeLog)
+class ReportTemplateRecommendationTuningDecisionRulesChangeLogAdmin(admin.ModelAdmin):
+    list_display = (
+        "created_at",
+        "action",
+        "decision_rules",
+        "changed_by",
+        "changed_field_count",
+        "experiment_label",
+        "experiment_status",
+        "experiment_outcome",
+    )
+    list_filter = ("action", "experiment_status", "experiment_outcome", "created_at")
+    search_fields = ("decision_rules__name", "changed_by__email", "reason", "request_path", "experiment_label", "experiment_notes")
+    readonly_fields = ("created_at", "updated_at", "before", "after", "diff", "outcome_recorded_at", "outcome_recorded_by")
+
+
+@admin.register(ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot)
+class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshotAdmin(admin.ModelAdmin):
+    list_display = ("experiment_label", "window_days", "generated_at", "generated_by")
+    list_filter = ("window_days", "generated_at")
+    search_fields = ("change_log__experiment_label", "notes", "generated_by__email")
+    readonly_fields = ("before_metrics", "after_metrics", "deltas", "summary", "generated_at", "created_at", "updated_at")
+
+    def experiment_label(self, obj):
+        return obj.experiment_label
+
+
 
 @admin.register(ResourceCTARecommendationFeedback)
 class ResourceCTARecommendationFeedbackAdmin(admin.ModelAdmin):

@@ -14,8 +14,15 @@ from studio.models import (
     PublishingRecord,
     ExperimentDecisionTuningChangeLog,
     ExperimentDecisionTuningExperimentSnapshot,
+    ExperimentDecisionTuningSnapshotComparisonReport,
+    ExperimentDecisionTuningSnapshotComparisonReportTemplate,
+    ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback,
     RecommendationTuningChangeLog,
     RecommendationTuningExperimentSnapshot,
+    ReportTemplateRecommendationTuningChangeLog,
+    ReportTemplateRecommendationTuningDecisionRulesChangeLog,
+    ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot,
+    ReportTemplateRecommendationTuningExperimentSnapshot,
     ResourceCTAClickEvent,
     ResourceLessonConversionEvent,
     ResourcePerformanceEvent,
@@ -225,3 +232,153 @@ def snapshot_section_rows(snapshot: RecommendationTuningExperimentSnapshot) -> l
                 "is_percent_metric": metric_key in PERCENT_METRICS,
             })
     return rows
+
+
+TEMPLATE_SECTION_LABELS = {
+    "template_usage": "Template usage",
+    "saved_reports": "Saved comparison reports",
+    "decision_outcomes": "Report decisions",
+    "recommendation_feedback": "Recommendation feedback",
+}
+
+TEMPLATE_METRIC_LABELS = {
+    "active_templates": "Active templates",
+    "reports_created": "Reports created",
+    "snapshots_attached": "Snapshots attached",
+    "presets_attached": "Preset profiles attached",
+    "keep_decisions": "Keep decisions",
+    "rollback_decisions": "Roll back decisions",
+    "watch_decisions": "Watch decisions",
+    "archived_decisions": "Archived decisions",
+    "undecided_reports": "Undecided reports",
+    "recommendations_shown": "Recommendations shown",
+    "useful_feedback": "Useful feedback",
+    "dismissed_feedback": "Dismissed feedback",
+    "revisit_feedback": "Revisit-later feedback",
+    "ignored_feedback": "Ignored recommendations",
+    "total_feedback_actions": "Total feedback actions",
+}
+
+
+def _template_metrics_for_window(start, end) -> dict[str, dict[str, Any]]:
+    reports = ExperimentDecisionTuningSnapshotComparisonReport.objects.filter(created_at__gte=start, created_at__lt=end)
+    reports_with_templates = reports.filter(source_template__isnull=False)
+    decision_counts = _count_by(reports, "decision_status")
+    snapshots_attached = sum(report.snapshots.count() for report in reports)
+    presets_attached = sum(len(report.preset_keys or []) for report in reports)
+
+    feedback = ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.objects.filter(last_seen_at__gte=start, last_seen_at__lt=end)
+    feedback_counts = _count_by(feedback, "status")
+
+    template_usage = {
+        "active_templates": ExperimentDecisionTuningSnapshotComparisonReportTemplate.objects.filter(is_active=True).count(),
+        "reports_created": reports_with_templates.count(),
+    }
+    saved_reports = {
+        "reports_created": reports.count(),
+        "snapshots_attached": snapshots_attached,
+        "presets_attached": presets_attached,
+    }
+    decision_outcomes = {
+        "keep_decisions": decision_counts.get(ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.KEEP, 0),
+        "rollback_decisions": decision_counts.get(ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.ROLL_BACK, 0),
+        "watch_decisions": decision_counts.get(ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.WATCH, 0),
+        "archived_decisions": decision_counts.get(ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.ARCHIVED, 0),
+        "undecided_reports": decision_counts.get(ExperimentDecisionTuningSnapshotComparisonReport.DecisionStatus.UNDECIDED, 0),
+    }
+    recommendation_feedback = {
+        "recommendations_shown": feedback.aggregate(total=Sum("times_shown")).get("total") or 0,
+        "useful_feedback": feedback_counts.get(ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.Status.USEFUL, 0),
+        "dismissed_feedback": feedback_counts.get(ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.Status.DISMISSED, 0),
+        "revisit_feedback": feedback_counts.get(ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.Status.REVISIT, 0),
+        "ignored_feedback": feedback.filter(status=ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.Status.SHOWN, times_shown__gte=3).count(),
+        "total_feedback_actions": feedback.exclude(status=ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeedback.Status.SHOWN).count(),
+    }
+    return {
+        "template_usage": template_usage,
+        "saved_reports": saved_reports,
+        "decision_outcomes": decision_outcomes,
+        "recommendation_feedback": recommendation_feedback,
+    }
+
+
+def build_report_template_recommendation_tuning_snapshot_payload(change_log: ReportTemplateRecommendationTuningChangeLog, window_days: int) -> dict[str, Any]:
+    anchor = change_log.created_at
+    before_start = anchor - timedelta(days=window_days)
+    before_end = anchor
+    after_start = anchor
+    after_end = anchor + timedelta(days=window_days)
+    before_metrics = _template_metrics_for_window(before_start, before_end)
+    after_metrics = _template_metrics_for_window(after_start, after_end)
+    deltas: dict[str, dict[str, Any]] = {}
+    for section_key, section_metrics in before_metrics.items():
+        deltas[section_key] = {}
+        for metric_key, before_value in section_metrics.items():
+            deltas[section_key][metric_key] = _delta_value(before_value, after_metrics.get(section_key, {}).get(metric_key))
+    summary = {
+        "primary_template_delta": deltas["template_usage"].get("reports_created", {}),
+        "primary_report_delta": deltas["saved_reports"].get("reports_created", {}),
+        "primary_decision_delta": deltas["decision_outcomes"].get("keep_decisions", {}),
+        "primary_feedback_delta": deltas["recommendation_feedback"].get("useful_feedback", {}),
+    }
+    return {
+        "before_start": before_start,
+        "before_end": before_end,
+        "after_start": after_start,
+        "after_end": after_end,
+        "before_metrics": before_metrics,
+        "after_metrics": after_metrics,
+        "deltas": deltas,
+        "summary": summary,
+    }
+
+
+def create_report_template_recommendation_tuning_experiment_snapshot(*, change_log: ReportTemplateRecommendationTuningChangeLog, window_days: int = 14, generated_by=None, notes: str = "") -> ReportTemplateRecommendationTuningExperimentSnapshot:
+    payload = build_report_template_recommendation_tuning_snapshot_payload(change_log, window_days)
+    return ReportTemplateRecommendationTuningExperimentSnapshot.objects.create(
+        change_log=change_log,
+        window_days=window_days,
+        generated_by=generated_by,
+        generated_at=timezone.now(),
+        notes=notes,
+        **payload,
+    )
+
+
+def report_template_snapshot_section_rows(snapshot: ReportTemplateRecommendationTuningExperimentSnapshot) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for section_key, metrics in (snapshot.deltas or {}).items():
+        for metric_key, values in metrics.items():
+            rows.append({
+                "section_key": section_key,
+                "section_label": TEMPLATE_SECTION_LABELS.get(section_key, section_key.replace("_", " ").title()),
+                "metric_key": metric_key,
+                "metric_label": TEMPLATE_METRIC_LABELS.get(metric_key, metric_key.replace("_", " ").title()),
+                "before": values.get("before"),
+                "after": values.get("after"),
+                "change": values.get("change"),
+                "pct": values.get("pct"),
+                "is_percent_metric": False,
+            })
+    return rows
+
+
+def build_report_template_recommendation_decision_rule_snapshot_payload(change_log: ReportTemplateRecommendationTuningDecisionRulesChangeLog, window_days: int) -> dict[str, Any]:
+    """Build before/after metrics for template-recommendation decision-rule experiments."""
+    return build_report_template_recommendation_tuning_snapshot_payload(change_log, window_days)
+
+
+def create_report_template_recommendation_decision_rule_experiment_snapshot(*, change_log: ReportTemplateRecommendationTuningDecisionRulesChangeLog, window_days: int = 14, generated_by=None, notes: str = "") -> ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot:
+    payload = build_report_template_recommendation_decision_rule_snapshot_payload(change_log, window_days)
+    return ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot.objects.create(
+        change_log=change_log,
+        window_days=window_days,
+        generated_by=generated_by,
+        generated_at=timezone.now(),
+        notes=notes,
+        **payload,
+    )
+
+
+def report_template_decision_rule_snapshot_section_rows(snapshot: ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot) -> list[dict[str, Any]]:
+    return report_template_snapshot_section_rows(snapshot)

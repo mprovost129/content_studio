@@ -2297,6 +2297,430 @@ class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationFeed
 
 
 
+class ReportTemplateRecommendationTuning(TimestampedModel):
+    """Editable scoring controls for saved report-template recommendations."""
+
+    name = models.CharField(max_length=120, default="Default report-template recommendation tuning")
+    is_active = models.BooleanField(default=True, db_index=True)
+    base_template_score = models.IntegerField(default=25, validators=[MinValueValidator(-100), MaxValueValidator(200)])
+    high_priority_threshold = models.IntegerField(default=80, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    medium_priority_threshold = models.IntegerField(default=55, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    matching_window_weight = models.IntegerField(default=5, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    matching_window_cap = models.IntegerField(default=15, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    unused_template_bonus = models.IntegerField(default=18, validators=[MinValueValidator(-100), MaxValueValidator(200)])
+    keep_decision_weight = models.IntegerField(default=7, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    keep_decision_cap = models.IntegerField(default=20, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    watch_decision_weight = models.IntegerField(default=4, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    watch_decision_cap = models.IntegerField(default=10, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    rollback_decision_penalty = models.IntegerField(default=5, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    rollback_decision_cap = models.IntegerField(default=14, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    underused_family_bonus = models.IntegerField(default=8, validators=[MinValueValidator(-100), MaxValueValidator(200)])
+    focus_area_weight = models.IntegerField(default=2, validators=[MinValueValidator(0), MaxValueValidator(50)])
+    focus_area_cap = models.IntegerField(default=8, validators=[MinValueValidator(0), MaxValueValidator(200)])
+    preset_default_weight = models.IntegerField(default=3, validators=[MinValueValidator(0), MaxValueValidator(50)])
+    preset_default_cap = models.IntegerField(default=7, validators=[MinValueValidator(0), MaxValueValidator(200)])
+    exact_useful_boost = models.IntegerField(default=12, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    exact_useful_cap = models.IntegerField(default=24, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    exact_dismissed_penalty = models.IntegerField(default=18, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    exact_dismissed_cap = models.IntegerField(default=36, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    exact_revisit_boost = models.IntegerField(default=4, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    exact_revisit_cap = models.IntegerField(default=8, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    exact_ignored_penalty = models.IntegerField(default=4, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    exact_ignored_cap = models.IntegerField(default=12, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    similar_useful_boost = models.IntegerField(default=3, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    similar_useful_cap = models.IntegerField(default=10, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    similar_dismissed_penalty = models.IntegerField(default=4, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    similar_dismissed_cap = models.IntegerField(default=14, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    similar_revisit_boost = models.IntegerField(default=2, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    similar_revisit_cap = models.IntegerField(default=6, validators=[MinValueValidator(0), MaxValueValidator(300)])
+    feedback_adjustment_floor = models.IntegerField(default=-40, validators=[MinValueValidator(-500), MaxValueValidator(0)])
+    feedback_adjustment_ceiling = models.IntegerField(default=30, validators=[MinValueValidator(0), MaxValueValidator(500)])
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-is_active", "name")
+        verbose_name = "report-template recommendation tuning"
+        verbose_name_plural = "report-template recommendation tuning"
+
+    def __str__(self):
+        return f"{self.name}{' (active)' if self.is_active else ''}"
+
+    @classmethod
+    def get_active(cls):
+        tuning = cls.objects.filter(is_active=True).order_by("pk").first()
+        if tuning:
+            return tuning
+        return cls.objects.create(name="Default report-template recommendation tuning", is_active=True)
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.is_active:
+            type(self).objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
+
+
+class ReportTemplateRecommendationTuningChangeLog(TimestampedModel):
+    """Audit trail for report-template recommendation tuning changes, rollbacks, and experiments."""
+
+    class Action(models.TextChoices):
+        MANUAL_UPDATE = "manual_update", "Manual update"
+        ROLLBACK_RESTORED = "rollback_restored", "Rollback restored"
+
+    class ExperimentStatus(models.TextChoices):
+        NOT_EXPERIMENT = "not_experiment", "Not an experiment"
+        PLANNED = "planned", "Planned"
+        RUNNING = "running", "Running"
+        KEEP = "keep", "Keep changes"
+        ROLLBACK = "rollback", "Rollback recommended"
+        COMPLETE = "complete", "Complete"
+        INCONCLUSIVE = "inconclusive", "Inconclusive"
+
+    class ExperimentOutcome(models.TextChoices):
+        NOT_RECORDED = "not_recorded", "Not recorded"
+        POSITIVE = "positive", "Positive"
+        NEUTRAL = "neutral", "Neutral"
+        NEGATIVE = "negative", "Negative"
+        INCONCLUSIVE = "inconclusive", "Inconclusive"
+
+    tuning = models.ForeignKey(
+        ReportTemplateRecommendationTuning,
+        on_delete=models.CASCADE,
+        related_name="change_logs",
+    )
+    action = models.CharField(max_length=30, choices=Action.choices, db_index=True)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="report_template_recommendation_tuning_changes",
+    )
+    reason = models.TextField(blank=True)
+    before = models.JSONField(default=dict, blank=True)
+    after = models.JSONField(default=dict, blank=True)
+    diff = models.JSONField(default=dict, blank=True)
+    request_path = models.CharField(max_length=300, blank=True)
+    experiment_label = models.CharField(
+        max_length=160,
+        blank=True,
+        db_index=True,
+        help_text="Optional label for a template-recommendation tuning experiment, such as August template recommendation test.",
+    )
+    experiment_status = models.CharField(
+        max_length=30,
+        choices=ExperimentStatus.choices,
+        default=ExperimentStatus.NOT_EXPERIMENT,
+        db_index=True,
+    )
+    experiment_outcome = models.CharField(
+        max_length=30,
+        choices=ExperimentOutcome.choices,
+        default=ExperimentOutcome.NOT_RECORDED,
+        db_index=True,
+    )
+    experiment_notes = models.TextField(
+        blank=True,
+        help_text="Hypothesis, result notes, decision rationale, or follow-up observations for this template-recommendation tuning experiment.",
+    )
+    outcome_recorded_at = models.DateTimeField(null=True, blank=True)
+    outcome_recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="report_template_recommendation_tuning_outcomes_recorded",
+    )
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        indexes = [
+            models.Index(fields=("action", "created_at")),
+            models.Index(fields=("tuning", "created_at")),
+        ]
+        verbose_name = "report-template recommendation tuning change"
+        verbose_name_plural = "report-template recommendation tuning changes"
+
+    def __str__(self):
+        return f"{self.get_action_display()} · {self.tuning.name} · {self.created_at:%Y-%m-%d}"
+
+    @property
+    def changed_field_count(self):
+        return len(self.diff or {})
+
+    @property
+    def is_experiment(self):
+        return bool(self.experiment_label or self.experiment_status != self.ExperimentStatus.NOT_EXPERIMENT)
+
+
+class ReportTemplateRecommendationTuningExperimentSnapshot(TimestampedModel):
+    """Before/after snapshot for report-template recommendation tuning experiments."""
+
+    change_log = models.ForeignKey(
+        ReportTemplateRecommendationTuningChangeLog,
+        on_delete=models.CASCADE,
+        related_name="performance_snapshots",
+    )
+    window_days = models.PositiveSmallIntegerField(default=14)
+    before_start = models.DateTimeField(db_index=True)
+    before_end = models.DateTimeField(db_index=True)
+    after_start = models.DateTimeField(db_index=True)
+    after_end = models.DateTimeField(db_index=True)
+    before_metrics = models.JSONField(default=dict, blank=True)
+    after_metrics = models.JSONField(default=dict, blank=True)
+    deltas = models.JSONField(default=dict, blank=True)
+    summary = models.JSONField(default=dict, blank=True)
+    notes = models.TextField(blank=True)
+    generated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="report_template_recommendation_tuning_experiment_snapshots",
+    )
+    generated_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ("-generated_at", "-pk")
+        indexes = [
+            models.Index(fields=("change_log", "generated_at")),
+            models.Index(fields=("before_start", "after_end")),
+        ]
+        verbose_name = "report-template recommendation tuning experiment snapshot"
+        verbose_name_plural = "report-template recommendation tuning experiment snapshots"
+
+    @property
+    def experiment_label(self):
+        return self.change_log.experiment_label or self.change_log.get_action_display()
+
+    def __str__(self):
+        return f"{self.experiment_label} · {self.window_days} day template-recommendation snapshot"
+
+
+
+
+class ReportTemplateRecommendationTuningDecisionRules(TimestampedModel):
+    """Editable keep / rollback / watch rules for report-template recommendation tuning snapshots."""
+
+    name = models.CharField(max_length=140, default="Default template-recommendation decision rules")
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    keep_score_threshold = models.FloatField(default=8.0, validators=[MinValueValidator(0), MaxValueValidator(500)])
+    keep_primary_positive_min = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(0), MaxValueValidator(10)])
+    keep_high_confidence_score = models.FloatField(default=18.0, validators=[MinValueValidator(0), MaxValueValidator(1000)])
+    rollback_score_threshold = models.FloatField(default=-7.0, validators=[MinValueValidator(-500), MaxValueValidator(0)])
+    rollback_primary_negative_min = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(0), MaxValueValidator(10)])
+    rollback_high_confidence_score = models.FloatField(default=-16.0, validators=[MinValueValidator(-1000), MaxValueValidator(0)])
+    low_confidence_abs_score = models.FloatField(default=5.0, validators=[MinValueValidator(0), MaxValueValidator(500)])
+    max_metric_change_magnitude = models.FloatField(default=25.0, validators=[MinValueValidator(0.1), MaxValueValidator(500)])
+
+    template_usage_reports_created_weight = models.FloatField(default=3.0, validators=[MinValueValidator(-50), MaxValueValidator(50)])
+    saved_reports_reports_created_weight = models.FloatField(default=2.2, validators=[MinValueValidator(-50), MaxValueValidator(50)])
+    saved_reports_snapshots_attached_weight = models.FloatField(default=1.0, validators=[MinValueValidator(-50), MaxValueValidator(50)])
+    saved_reports_presets_attached_weight = models.FloatField(default=0.7, validators=[MinValueValidator(-50), MaxValueValidator(50)])
+    decision_keep_decisions_weight = models.FloatField(default=3.4, validators=[MinValueValidator(-50), MaxValueValidator(50)])
+    decision_watch_decisions_weight = models.FloatField(default=1.2, validators=[MinValueValidator(-50), MaxValueValidator(50)])
+    feedback_useful_weight = models.FloatField(default=4.0, validators=[MinValueValidator(-50), MaxValueValidator(50)])
+    feedback_revisit_weight = models.FloatField(default=1.0, validators=[MinValueValidator(-50), MaxValueValidator(50)])
+    feedback_total_actions_weight = models.FloatField(default=0.8, validators=[MinValueValidator(-50), MaxValueValidator(50)])
+
+    decision_rollback_decisions_penalty = models.FloatField(default=3.6, validators=[MinValueValidator(0), MaxValueValidator(50)])
+    decision_archived_decisions_penalty = models.FloatField(default=1.0, validators=[MinValueValidator(0), MaxValueValidator(50)])
+    feedback_dismissed_penalty = models.FloatField(default=4.0, validators=[MinValueValidator(0), MaxValueValidator(50)])
+    feedback_ignored_penalty = models.FloatField(default=1.6, validators=[MinValueValidator(0), MaxValueValidator(50)])
+
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ("-is_active", "name")
+        verbose_name = "report-template tuning decision rule"
+        verbose_name_plural = "report-template tuning decision rules"
+
+    def __str__(self):
+        return f"{self.name}{' (active)' if self.is_active else ''}"
+
+    @classmethod
+    def get_active(cls):
+        rules = cls.objects.filter(is_active=True).order_by("pk").first()
+        if rules:
+            return rules
+        return cls.objects.create(name="Default template-recommendation decision rules", is_active=True)
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if self.is_active:
+            type(self).objects.exclude(pk=self.pk).filter(is_active=True).update(is_active=False)
+
+    def positive_weight_items(self):
+        return {
+            ("template_usage", "reports_created"): self.template_usage_reports_created_weight,
+            ("saved_reports", "reports_created"): self.saved_reports_reports_created_weight,
+            ("saved_reports", "snapshots_attached"): self.saved_reports_snapshots_attached_weight,
+            ("saved_reports", "presets_attached"): self.saved_reports_presets_attached_weight,
+            ("decision_outcomes", "keep_decisions"): self.decision_keep_decisions_weight,
+            ("decision_outcomes", "watch_decisions"): self.decision_watch_decisions_weight,
+            ("recommendation_feedback", "useful_feedback"): self.feedback_useful_weight,
+            ("recommendation_feedback", "revisit_feedback"): self.feedback_revisit_weight,
+            ("recommendation_feedback", "total_feedback_actions"): self.feedback_total_actions_weight,
+        }
+
+    def negative_weight_items(self):
+        return {
+            ("decision_outcomes", "rollback_decisions"): self.decision_rollback_decisions_penalty,
+            ("decision_outcomes", "archived_decisions"): self.decision_archived_decisions_penalty,
+            ("recommendation_feedback", "dismissed_feedback"): self.feedback_dismissed_penalty,
+            ("recommendation_feedback", "ignored_feedback"): self.feedback_ignored_penalty,
+        }
+
+    def threshold_summary(self):
+        return {
+            "keep_score_threshold": self.keep_score_threshold,
+            "keep_primary_positive_min": self.keep_primary_positive_min,
+            "keep_high_confidence_score": self.keep_high_confidence_score,
+            "rollback_score_threshold": self.rollback_score_threshold,
+            "rollback_primary_negative_min": self.rollback_primary_negative_min,
+            "rollback_high_confidence_score": self.rollback_high_confidence_score,
+            "low_confidence_abs_score": self.low_confidence_abs_score,
+            "max_metric_change_magnitude": self.max_metric_change_magnitude,
+        }
+
+
+class ReportTemplateRecommendationTuningDecisionRulesChangeLog(TimestampedModel):
+    """Audit trail for report-template recommendation snapshot decision-rule changes and rollbacks."""
+
+    class Action(models.TextChoices):
+        MANUAL_UPDATE = "manual_update", "Manual update"
+        ROLLBACK_RESTORED = "rollback_restored", "Rollback restored"
+
+    class ExperimentStatus(models.TextChoices):
+        NOT_EXPERIMENT = "not_experiment", "Not an experiment"
+        PLANNED = "planned", "Planned"
+        RUNNING = "running", "Running"
+        KEEP = "keep", "Keep changes"
+        ROLLBACK = "rollback", "Rollback recommended"
+        COMPLETE = "complete", "Complete"
+        INCONCLUSIVE = "inconclusive", "Inconclusive"
+
+    class ExperimentOutcome(models.TextChoices):
+        NOT_RECORDED = "not_recorded", "Not recorded"
+        POSITIVE = "positive", "Positive"
+        NEUTRAL = "neutral", "Neutral"
+        NEGATIVE = "negative", "Negative"
+        INCONCLUSIVE = "inconclusive", "Inconclusive"
+
+    decision_rules = models.ForeignKey(
+        ReportTemplateRecommendationTuningDecisionRules,
+        on_delete=models.CASCADE,
+        related_name="change_logs",
+    )
+    action = models.CharField(max_length=30, choices=Action.choices, db_index=True)
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="report_template_recommendation_decision_rule_changes",
+    )
+    reason = models.TextField(blank=True)
+    before = models.JSONField(default=dict, blank=True)
+    after = models.JSONField(default=dict, blank=True)
+    diff = models.JSONField(default=dict, blank=True)
+    request_path = models.CharField(max_length=300, blank=True)
+    experiment_label = models.CharField(
+        max_length=160,
+        blank=True,
+        db_index=True,
+        help_text="Optional label for a template-recommendation decision-rule experiment, such as September Keep threshold test.",
+    )
+    experiment_status = models.CharField(
+        max_length=30,
+        choices=ExperimentStatus.choices,
+        default=ExperimentStatus.NOT_EXPERIMENT,
+        db_index=True,
+    )
+    experiment_outcome = models.CharField(
+        max_length=30,
+        choices=ExperimentOutcome.choices,
+        default=ExperimentOutcome.NOT_RECORDED,
+        db_index=True,
+    )
+    experiment_notes = models.TextField(
+        blank=True,
+        help_text="Hypothesis, result notes, decision rationale, or follow-up observations for this decision-rule experiment.",
+    )
+    outcome_recorded_at = models.DateTimeField(null=True, blank=True)
+    outcome_recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="report_template_recommendation_decision_rule_outcomes_recorded",
+    )
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        indexes = [
+            models.Index(fields=("action", "created_at")),
+            models.Index(fields=("decision_rules", "created_at")),
+        ]
+        verbose_name = "report-template recommendation decision-rule change"
+        verbose_name_plural = "report-template recommendation decision-rule changes"
+
+    def __str__(self):
+        return f"{self.get_action_display()} · {self.decision_rules.name} · {self.created_at:%Y-%m-%d}"
+
+    @property
+    def changed_field_count(self):
+        return len(self.diff or {})
+
+    @property
+    def is_experiment(self):
+        return bool(self.experiment_label or self.experiment_status != self.ExperimentStatus.NOT_EXPERIMENT)
+
+
+class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot(TimestampedModel):
+    """Before/after snapshot for report-template recommendation decision-rule experiments."""
+
+    change_log = models.ForeignKey(
+        ReportTemplateRecommendationTuningDecisionRulesChangeLog,
+        on_delete=models.CASCADE,
+        related_name="performance_snapshots",
+    )
+    window_days = models.PositiveSmallIntegerField(default=14)
+    before_start = models.DateTimeField(db_index=True)
+    before_end = models.DateTimeField(db_index=True)
+    after_start = models.DateTimeField(db_index=True)
+    after_end = models.DateTimeField(db_index=True)
+    before_metrics = models.JSONField(default=dict, blank=True)
+    after_metrics = models.JSONField(default=dict, blank=True)
+    deltas = models.JSONField(default=dict, blank=True)
+    summary = models.JSONField(default=dict, blank=True)
+    notes = models.TextField(blank=True)
+    generated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="report_template_recommendation_decision_rule_experiment_snapshots",
+    )
+    generated_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ("-generated_at", "-pk")
+        indexes = [
+            models.Index(fields=("change_log", "generated_at")),
+            models.Index(fields=("before_start", "after_end")),
+        ]
+        verbose_name = "report-template recommendation decision-rule experiment snapshot"
+        verbose_name_plural = "report-template recommendation decision-rule experiment snapshots"
+
+    @property
+    def experiment_label(self):
+        return self.change_log.experiment_label or self.change_log.get_action_display()
+
+    def __str__(self):
+        return f"{self.experiment_label} · {self.window_days} day template decision-rule snapshot"
+
+
+
 class ResourceCTARecommendationFeedback(TimestampedModel):
     class Status(models.TextChoices):
         SHOWN = "shown", "Shown / ignored"

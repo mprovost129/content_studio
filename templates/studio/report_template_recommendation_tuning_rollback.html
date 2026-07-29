@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Restore template recommendation tuning{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">REPORT TEMPLATE RECOMMENDATIONS</span>
+        <h1>Review tuning restore</h1>
+        <p>Restore the active report-template recommendation scoring profile from a prior audit snapshot.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-history' %}">Back to history</a>
+    </div>
+</section>
+
+<section class="panel">
+    <h2>Change #{{ change_log.pk }}</h2>
+    <p><strong>Action:</strong> {{ change_log.get_action_display }} · <strong>Date:</strong> {{ change_log.created_at|date:"M j, Y g:i A" }}</p>
+    <p><strong>Reason:</strong> {{ change_log.reason|default:"No reason entered" }}</p>
+</section>
+
+<section class="panel mt-4">
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Field</th><th>Current active</th><th>Before snapshot</th><th>After snapshot</th></tr></thead>
+            <tbody>
+                {% for row in tracked_fields %}
+                <tr>
+                    <td><code>{{ row.name }}</code></td>
+                    <td>{{ row.active }}</td>
+                    <td>{{ row.before }}</td>
+                    <td>{{ row.after }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel mt-4">
+    <form method="post" class="form-panel">
+        {% csrf_token %}
+        <label class="form-label">Snapshot to restore</label>
+        <select name="snapshot" class="form-select">
+            <option value="before">Before-change snapshot</option>
+            <option value="after">After-change snapshot</option>
+        </select>
+        <label class="form-label mt-3">Rollback reason</label>
+        <textarea name="rollback_reason" rows="3" class="form-control" placeholder="Why are you restoring this configuration?"></textarea>
+        <div class="form-actions mt-3">
+            <button class="btn btn-primary" type="submit">Restore selected snapshot</button>
+            <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-history' %}">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

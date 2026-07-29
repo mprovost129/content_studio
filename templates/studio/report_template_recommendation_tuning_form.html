@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Report-template recommendation tuning{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">REPORT TEMPLATE RECOMMENDATIONS</span>
+        <h1>Recommendation tuning</h1>
+        <p>Adjust how Studio ranks saved-report template suggestions. Use these controls to emphasize underused templates, prior Keep decisions, feedback, recommended snapshot windows, or preset defaults.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations' %}">Template recommendations</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback' %}">Feedback history</a>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-history' %}">Tuning history</a>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules' %}">Decision rules</a>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}">Template usage</a>
+    </div>
+</section>
+
+<form method="post" class="panel form-panel">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+
+    <section class="mb-4">
+        <span class="eyebrow">PROFILE AND PRIORITY THRESHOLDS</span>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'name' or field.name == 'is_active' or field.name == 'base_template_score' or field.name == 'high_priority_threshold' or field.name == 'medium_priority_threshold' or field.name == 'notes' %}
+                <div class="col-md-{% if field.name == 'notes' %}12{% else %}4{% endif %}">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="mb-4">
+        <span class="eyebrow">SNAPSHOT AND USAGE WEIGHTS</span>
+        <p class="text-muted">These values control how strongly recent snapshots, prior reports, decisions, and underused template families affect ranking.</p>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'matching_window_weight' or field.name == 'matching_window_cap' or field.name == 'unused_template_bonus' or field.name == 'keep_decision_weight' or field.name == 'keep_decision_cap' or field.name == 'watch_decision_weight' or field.name == 'watch_decision_cap' or field.name == 'rollback_decision_penalty' or field.name == 'rollback_decision_cap' or field.name == 'underused_family_bonus' %}
+                <div class="col-md-3">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="mb-4">
+        <span class="eyebrow">TEMPLATE CONTENT WEIGHTS</span>
+        <p class="text-muted">These weights reward templates that already include focus areas and default decision-rule presets.</p>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'focus_area_weight' or field.name == 'focus_area_cap' or field.name == 'preset_default_weight' or field.name == 'preset_default_cap' %}
+                <div class="col-md-3">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="mb-4">
+        <span class="eyebrow">FEEDBACK WEIGHTS</span>
+        <p class="text-muted">These values control how Useful, Dismiss, Revisit later, and repeated ignored signals change future recommendation rankings.</p>
+        <div class="row g-3">
+            {% for field in form %}
+                {% if field.name == 'exact_useful_boost' or field.name == 'exact_useful_cap' or field.name == 'exact_dismissed_penalty' or field.name == 'exact_dismissed_cap' or field.name == 'exact_revisit_boost' or field.name == 'exact_revisit_cap' or field.name == 'exact_ignored_penalty' or field.name == 'exact_ignored_cap' or field.name == 'similar_useful_boost' or field.name == 'similar_useful_cap' or field.name == 'similar_dismissed_penalty' or field.name == 'similar_dismissed_cap' or field.name == 'similar_revisit_boost' or field.name == 'similar_revisit_cap' or field.name == 'feedback_adjustment_floor' or field.name == 'feedback_adjustment_ceiling' %}
+                <div class="col-md-3">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+                    {% for error in field.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="mb-4">
+        <span class="eyebrow">EXPERIMENT TRACKING</span>
+        <p class="text-muted">Optional. Use these fields when a weight change is part of a named template-ranking experiment.</p>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label for="{{ form.experiment_label.id_for_label }}" class="form-label">{{ form.experiment_label.label }}</label>
+                {{ form.experiment_label }}
+                {% if form.experiment_label.help_text %}<div class="form-text">{{ form.experiment_label.help_text }}</div>{% endif %}
+                {% for error in form.experiment_label.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+                <label for="{{ form.experiment_status.id_for_label }}" class="form-label">{{ form.experiment_status.label }}</label>
+                {{ form.experiment_status }}
+                {% for error in form.experiment_status.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-4">
+                <label for="{{ form.reason_note.id_for_label }}" class="form-label">{{ form.reason_note.label }}</label>
+                {{ form.reason_note }}
+                {% if form.reason_note.help_text %}<div class="form-text">{{ form.reason_note.help_text }}</div>{% endif %}
+                {% for error in form.reason_note.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+            <div class="col-md-12">
+                <label for="{{ form.experiment_notes.id_for_label }}" class="form-label">{{ form.experiment_notes.label }}</label>
+                {{ form.experiment_notes }}
+                {% if form.experiment_notes.help_text %}<div class="form-text">{{ form.experiment_notes.help_text }}</div>{% endif %}
+                {% for error in form.experiment_notes.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+            </div>
+        </div>
+    </section>
+
+    <div class="form-actions">
+        <button class="btn btn-primary" type="submit">Save template recommendation tuning</button>
+        <a class="btn btn-secondary" href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations' %}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

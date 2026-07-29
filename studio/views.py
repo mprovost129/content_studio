@@ -40,6 +40,12 @@ from .forms import (
     LearningResourceForm,
     ResourceCTAForm,
     ResourceIdeaForm,
+    ReportTemplateRecommendationTuningForm,
+    ReportTemplateRecommendationTuningDecisionRulesForm,
+    ReportTemplateRecommendationTuningDecisionRulesExperimentOutcomeForm,
+    ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshotForm,
+    ReportTemplateRecommendationTuningExperimentOutcomeForm,
+    ReportTemplateRecommendationTuningExperimentSnapshotForm,
     RecommendationTuningForm,
     ExperimentDecisionTuningForm,
     ExperimentDecisionTuningSimulationForm,
@@ -86,6 +92,12 @@ from .models import (
     ResourceCTAClickEvent,
     ResourceCTARecommendationFeedback,
     ResourceLessonConversionEvent,
+    ReportTemplateRecommendationTuning,
+    ReportTemplateRecommendationTuningChangeLog,
+    ReportTemplateRecommendationTuningDecisionRules,
+    ReportTemplateRecommendationTuningDecisionRulesChangeLog,
+    ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot,
+    ReportTemplateRecommendationTuningExperimentSnapshot,
     RecommendationTuning,
     ExperimentDecisionTuning,
     ExperimentDecisionTuningChangeLog,
@@ -113,6 +125,16 @@ from .services.report_template_recommendations import (
     build_report_template_recommendations,
     record_template_recommendation_response,
     record_template_recommendation_shown,
+)
+from .services.report_template_recommendation_tuning_history import (
+    create_report_template_tuning_change_log,
+    report_template_tuning_snapshot,
+    restore_report_template_tuning_snapshot,
+)
+from .services.report_template_recommendation_tuning_decision_rule_history import (
+    create_report_template_decision_rule_change_log,
+    report_template_decision_rule_snapshot,
+    restore_report_template_decision_rule_snapshot,
 )
 from .services.recommendation_tuning_presets import (
     PRESETS,
@@ -158,6 +180,10 @@ from .services.newsletter_imports import parse_newsletter_metrics
 from .services.experiment_snapshots import (
     create_experiment_snapshot,
     create_decision_rule_experiment_snapshot,
+    create_report_template_recommendation_tuning_experiment_snapshot,
+    create_report_template_recommendation_decision_rule_experiment_snapshot,
+    report_template_decision_rule_snapshot_section_rows,
+    report_template_snapshot_section_rows,
     snapshot_section_rows,
 )
 from .services.experiment_decisions import (
@@ -165,6 +191,15 @@ from .services.experiment_decisions import (
     apply_decision_to_decision_rule_change_log,
     recommend_experiment_decision,
 )
+from .services.report_template_recommendation_tuning_decisions import (
+    apply_report_template_tuning_decision_to_change_log,
+    recommend_report_template_tuning_decision,
+)
+from .services.report_template_recommendation_decision_rule_snapshot_decisions import (
+    apply_report_template_decision_rule_snapshot_decision_to_change_log,
+    recommend_report_template_decision_rule_snapshot_decision,
+)
+from .services.project_health import build_project_health_checks, grouped_project_health, project_health_summary
 from .services.provider_readiness import (
     ISSUE_LABELS,
     RECORD_TYPE_LABELS,
@@ -901,7 +936,26 @@ class ExperimentDecisionTuningExperimentSnapshotExportView(StaffRequiredMixin, D
         snapshot = self.get_object()
         filename = f"code-with-michael-decision-rule-experiment-snapshot-{snapshot.pk}.csv"
         response = _csv_response(filename)
+        recommendation = recommend_experiment_decision(snapshot)
         writer = csv.writer(response)
+        writer.writerow(["decision_recommendation", recommendation.label])
+        writer.writerow(["decision_confidence", recommendation.confidence])
+        writer.writerow(["decision_score", recommendation.score])
+        writer.writerow(["decision_summary", recommendation.summary])
+        writer.writerow([])
+        writer.writerow(["Weighted signals"])
+        writer.writerow(["section", "metric", "change", "weight", "contribution", "direction"])
+        for signal in recommendation.weighted_signals:
+            writer.writerow([
+                signal.get("section"),
+                signal.get("metric"),
+                signal.get("change"),
+                signal.get("weight"),
+                signal.get("contribution"),
+                signal.get("direction"),
+            ])
+        writer.writerow([])
+        writer.writerow(["Snapshot metrics"])
         writer.writerow([
             "experiment_label",
             "generated_at",
@@ -1323,17 +1377,646 @@ def _template_type_usage_rows(rows):
 
 
 
+class ReportTemplateRecommendationTuningUpdateView(StaffRequiredMixin, UpdateView):
+    model = ReportTemplateRecommendationTuning
+    form_class = ReportTemplateRecommendationTuningForm
+    template_name = "studio/report_template_recommendation_tuning_form.html"
+    context_object_name = "report_template_tuning"
+
+    def get_object(self, queryset=None):
+        return ReportTemplateRecommendationTuning.get_active()
+
+    def form_valid(self, form):
+        before = report_template_tuning_snapshot(self.get_object())
+        response = super().form_valid(form)
+        create_report_template_tuning_change_log(
+            self.object,
+            before=before,
+            action=ReportTemplateRecommendationTuningChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.request.user,
+            reason=form.cleaned_data.get("reason_note", ""),
+            request_path=self.request.path,
+            experiment_label=form.cleaned_data.get("experiment_label", ""),
+            experiment_status=form.cleaned_data.get("experiment_status") or ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+            experiment_notes=form.cleaned_data.get("experiment_notes", ""),
+        )
+        messages.success(self.request, "Report-template recommendation tuning saved and logged.")
+        return response
+
+    def get_success_url(self):
+        return reverse("studio:report-template-recommendation-tuning")
+
+
+class ReportTemplateRecommendationTuningHistoryView(StaffRequiredMixin, ListView):
+    model = ReportTemplateRecommendationTuningChangeLog
+    template_name = "studio/report_template_recommendation_tuning_history.html"
+    context_object_name = "change_logs"
+    paginate_by = 50
+
+    def get_queryset(self):
+        queryset = ReportTemplateRecommendationTuningChangeLog.objects.select_related("tuning", "changed_by")
+        action = self.request.GET.get("action", "")
+        status = self.request.GET.get("experiment_status", "")
+        outcome = self.request.GET.get("experiment_outcome", "")
+        label = self.request.GET.get("experiment_label", "").strip()
+        if action:
+            queryset = queryset.filter(action=action)
+        if status:
+            queryset = queryset.filter(experiment_status=status)
+        if outcome:
+            queryset = queryset.filter(experiment_outcome=outcome)
+        if label:
+            queryset = queryset.filter(experiment_label__icontains=label)
+        return queryset.order_by("-created_at", "-pk")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["actions"] = ReportTemplateRecommendationTuningChangeLog.Action.choices
+        context["experiment_statuses"] = ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.choices
+        context["experiment_outcomes"] = ReportTemplateRecommendationTuningChangeLog.ExperimentOutcome.choices
+        context["selected_action"] = self.request.GET.get("action", "")
+        context["selected_experiment_status"] = self.request.GET.get("experiment_status", "")
+        context["selected_experiment_outcome"] = self.request.GET.get("experiment_outcome", "")
+        context["selected_experiment_label"] = self.request.GET.get("experiment_label", "").strip()
+        context["latest_change"] = ReportTemplateRecommendationTuningChangeLog.objects.order_by("-created_at", "-pk").first()
+        context["total_changes"] = context.get("paginator").count if context.get("paginator") else len(context.get("change_logs", []))
+        context["active_experiment_count"] = ReportTemplateRecommendationTuningChangeLog.objects.exclude(experiment_status=ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT).exclude(experiment_status=ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.COMPLETE).count()
+        return context
+
+
+class ReportTemplateRecommendationTuningHistoryExportView(StaffRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        queryset = ReportTemplateRecommendationTuningChangeLog.objects.select_related("tuning", "changed_by").order_by("-created_at", "-pk")
+        action = request.GET.get("action", "")
+        status = request.GET.get("experiment_status", "")
+        outcome = request.GET.get("experiment_outcome", "")
+        label = request.GET.get("experiment_label", "").strip()
+        if action:
+            queryset = queryset.filter(action=action)
+        if status:
+            queryset = queryset.filter(experiment_status=status)
+        if outcome:
+            queryset = queryset.filter(experiment_outcome=outcome)
+        if label:
+            queryset = queryset.filter(experiment_label__icontains=label)
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="report_template_recommendation_tuning_history.csv"'
+        writer = csv.writer(response)
+        writer.writerow(["created_at", "action", "profile", "changed_by", "changed_fields", "experiment_label", "experiment_status", "experiment_outcome", "outcome_recorded_at", "outcome_recorded_by", "experiment_notes", "diff_json", "reason", "request_path"])
+        for log in queryset:
+            writer.writerow([
+                log.created_at.isoformat(),
+                log.get_action_display(),
+                log.tuning.name if log.tuning_id else "",
+                getattr(log.changed_by, "email", "") or "",
+                log.changed_field_count,
+                log.experiment_label,
+                log.get_experiment_status_display(),
+                log.get_experiment_outcome_display(),
+                log.outcome_recorded_at.isoformat() if log.outcome_recorded_at else "",
+                getattr(log.outcome_recorded_by, "email", "") or "",
+                log.experiment_notes,
+                json.dumps(log.diff, sort_keys=True),
+                log.reason,
+                log.request_path,
+            ])
+        return response
+
+
+class ReportTemplateRecommendationTuningRollbackView(StaffRequiredMixin, DetailView):
+    model = ReportTemplateRecommendationTuningChangeLog
+    template_name = "studio/report_template_recommendation_tuning_rollback.html"
+    context_object_name = "change_log"
+
+    def post(self, request, *args, **kwargs):
+        change_log = self.get_object()
+        snapshot = request.POST.get("snapshot", "before")
+        if snapshot not in {"before", "after"}:
+            messages.error(request, "Choose a valid report-template recommendation tuning snapshot to restore.")
+            return redirect("studio:report-template-recommendation-tuning-rollback", pk=change_log.pk)
+        restore_report_template_tuning_snapshot(
+            change_log,
+            snapshot=snapshot,
+            changed_by=request.user,
+            reason=request.POST.get("rollback_reason", ""),
+            request_path=request.path,
+        )
+        label = "before-change" if snapshot == "before" else "after-change"
+        messages.success(request, f"Restored the {label} report-template recommendation tuning snapshot and logged the rollback.")
+        return redirect("studio:report-template-recommendation-tuning-history")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        active = ReportTemplateRecommendationTuning.get_active()
+        active_snapshot = report_template_tuning_snapshot(active)
+        context["active_tuning"] = active
+        context["active_snapshot"] = active_snapshot
+        context["tracked_fields"] = [
+            {"name": field, "active": active_snapshot.get(field), "before": self.object.before.get(field), "after": self.object.after.get(field)}
+            for field in active_snapshot.keys()
+        ]
+        return context
+
+
+class ReportTemplateRecommendationTuningExperimentOutcomeView(StaffRequiredMixin, UpdateView):
+    model = ReportTemplateRecommendationTuningChangeLog
+    form_class = ReportTemplateRecommendationTuningExperimentOutcomeForm
+    template_name = "studio/report_template_recommendation_tuning_experiment_form.html"
+    context_object_name = "change_log"
+
+    def form_valid(self, form):
+        self.object = form.save(commit=False)
+        self.object.outcome_recorded_at = timezone.now()
+        self.object.outcome_recorded_by = self.request.user if self.request.user.is_authenticated else None
+        self.object.save(update_fields=[
+            "experiment_label",
+            "experiment_status",
+            "experiment_outcome",
+            "experiment_notes",
+            "outcome_recorded_at",
+            "outcome_recorded_by",
+            "updated_at",
+        ])
+        messages.success(self.request, "Template-recommendation tuning experiment outcome saved.")
+        return redirect("studio:report-template-recommendation-tuning-history")
+
+    def get_success_url(self):
+        return reverse("studio:report-template-recommendation-tuning-history")
+
+
+class ReportTemplateRecommendationTuningDecisionRulesUpdateView(StaffRequiredMixin, UpdateView):
+    model = ReportTemplateRecommendationTuningDecisionRules
+    form_class = ReportTemplateRecommendationTuningDecisionRulesForm
+    template_name = "studio/report_template_recommendation_tuning_decision_rules_form.html"
+    context_object_name = "decision_rules"
+
+    def get_object(self, queryset=None):
+        return ReportTemplateRecommendationTuningDecisionRules.get_active()
+
+    def form_valid(self, form):
+        before = report_template_decision_rule_snapshot(self.get_object())
+        response = super().form_valid(form)
+        create_report_template_decision_rule_change_log(
+            self.object,
+            before=before,
+            action=ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.MANUAL_UPDATE,
+            changed_by=self.request.user,
+            reason=form.cleaned_data.get("change_reason", ""),
+            request_path=self.request.path,
+            experiment_label=form.cleaned_data.get("experiment_label", ""),
+            experiment_status=form.cleaned_data.get("experiment_status", "") or ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+            experiment_notes=form.cleaned_data.get("experiment_notes", ""),
+        )
+        messages.success(self.request, "Template-recommendation snapshot decision rules saved and logged. Future snapshot decisions will use the active rule profile.")
+        return response
+
+    def get_success_url(self):
+        return reverse("studio:report-template-recommendation-tuning-decision-rules")
+
+
+class ReportTemplateRecommendationTuningDecisionRulesHistoryView(StaffRequiredMixin, ListView):
+    model = ReportTemplateRecommendationTuningDecisionRulesChangeLog
+    template_name = "studio/report_template_recommendation_tuning_decision_rules_history.html"
+    context_object_name = "change_logs"
+    paginate_by = 50
+
+    def get_queryset(self):
+        queryset = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.select_related("decision_rules", "changed_by")
+        action = self.request.GET.get("action", "")
+        status = self.request.GET.get("experiment_status", "")
+        outcome = self.request.GET.get("experiment_outcome", "")
+        label = self.request.GET.get("experiment_label", "").strip()
+        if action:
+            queryset = queryset.filter(action=action)
+        if status:
+            queryset = queryset.filter(experiment_status=status)
+        if outcome:
+            queryset = queryset.filter(experiment_outcome=outcome)
+        if label:
+            queryset = queryset.filter(experiment_label__icontains=label)
+        return queryset.order_by("-created_at", "-pk")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["actions"] = ReportTemplateRecommendationTuningDecisionRulesChangeLog.Action.choices
+        context["experiment_statuses"] = ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.choices
+        context["experiment_outcomes"] = ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentOutcome.choices
+        context["selected_action"] = self.request.GET.get("action", "")
+        context["selected_experiment_status"] = self.request.GET.get("experiment_status", "")
+        context["selected_experiment_outcome"] = self.request.GET.get("experiment_outcome", "")
+        context["selected_experiment_label"] = self.request.GET.get("experiment_label", "").strip()
+        context["latest_change"] = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.order_by("-created_at", "-pk").first()
+        context["total_changes"] = context.get("paginator").count if context.get("paginator") else len(context.get("change_logs", []))
+        context["active_experiment_count"] = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.exclude(experiment_status=ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.NOT_EXPERIMENT).exclude(experiment_status=ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.COMPLETE).count()
+        return context
+
+
+class ReportTemplateRecommendationTuningDecisionRulesHistoryExportView(StaffRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        queryset = ReportTemplateRecommendationTuningDecisionRulesChangeLog.objects.select_related("decision_rules", "changed_by").order_by("-created_at", "-pk")
+        action = request.GET.get("action", "")
+        status = request.GET.get("experiment_status", "")
+        outcome = request.GET.get("experiment_outcome", "")
+        label = request.GET.get("experiment_label", "").strip()
+        if action:
+            queryset = queryset.filter(action=action)
+        if status:
+            queryset = queryset.filter(experiment_status=status)
+        if outcome:
+            queryset = queryset.filter(experiment_outcome=outcome)
+        if label:
+            queryset = queryset.filter(experiment_label__icontains=label)
+        response = HttpResponse(content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="report_template_recommendation_decision_rule_history.csv"'
+        writer = csv.writer(response)
+        writer.writerow([
+            "created_at",
+            "action",
+            "decision_rule_profile",
+            "changed_by",
+            "changed_fields",
+            "experiment_label",
+            "experiment_status",
+            "experiment_outcome",
+            "outcome_recorded_at",
+            "outcome_recorded_by",
+            "experiment_notes",
+            "diff_json",
+            "reason",
+            "request_path",
+        ])
+        for log in queryset:
+            writer.writerow([
+                log.created_at.isoformat(),
+                log.get_action_display(),
+                log.decision_rules.name if log.decision_rules_id else "",
+                getattr(log.changed_by, "email", "") or "",
+                log.changed_field_count,
+                log.experiment_label,
+                log.get_experiment_status_display(),
+                log.get_experiment_outcome_display(),
+                log.outcome_recorded_at.isoformat() if log.outcome_recorded_at else "",
+                getattr(log.outcome_recorded_by, "email", "") or "",
+                log.experiment_notes,
+                json.dumps(log.diff, sort_keys=True),
+                log.reason,
+                log.request_path,
+            ])
+        return response
+
+
+class ReportTemplateRecommendationTuningDecisionRulesRollbackView(StaffRequiredMixin, DetailView):
+    model = ReportTemplateRecommendationTuningDecisionRulesChangeLog
+    template_name = "studio/report_template_recommendation_tuning_decision_rules_rollback.html"
+    context_object_name = "change_log"
+
+    def post(self, request, *args, **kwargs):
+        change_log = self.get_object()
+        snapshot = request.POST.get("snapshot", "before")
+        if snapshot not in {"before", "after"}:
+            messages.error(request, "Choose a valid template-recommendation decision-rule snapshot to restore.")
+            return redirect("studio:report-template-recommendation-tuning-decision-rules-rollback", pk=change_log.pk)
+        restore_report_template_decision_rule_snapshot(
+            change_log,
+            snapshot=snapshot,
+            changed_by=request.user,
+            reason=request.POST.get("rollback_reason", ""),
+            request_path=request.path,
+        )
+        label = "before-change" if snapshot == "before" else "after-change"
+        messages.success(request, f"Restored the {label} template-recommendation decision-rule snapshot and logged the rollback.")
+        return redirect("studio:report-template-recommendation-tuning-decision-rules-history")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        active = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        active_snapshot = report_template_decision_rule_snapshot(active)
+        context["active_decision_rules"] = active
+        context["active_snapshot"] = active_snapshot
+        context["tracked_fields"] = [
+            {"name": field, "active": active_snapshot.get(field), "before": self.object.before.get(field), "after": self.object.after.get(field)}
+            for field in active_snapshot.keys()
+        ]
+        return context
+
+
+
+
+class ReportTemplateRecommendationTuningDecisionRulesExperimentOutcomeView(StaffRequiredMixin, UpdateView):
+    model = ReportTemplateRecommendationTuningDecisionRulesChangeLog
+    form_class = ReportTemplateRecommendationTuningDecisionRulesExperimentOutcomeForm
+    template_name = "studio/report_template_recommendation_tuning_decision_rules_experiment_form.html"
+    context_object_name = "change_log"
+
+    def form_valid(self, form):
+        self.object = form.save(commit=False)
+        self.object.outcome_recorded_at = timezone.now()
+        self.object.outcome_recorded_by = self.request.user if self.request.user.is_authenticated else None
+        self.object.save(update_fields=[
+            "experiment_label",
+            "experiment_status",
+            "experiment_outcome",
+            "experiment_notes",
+            "outcome_recorded_at",
+            "outcome_recorded_by",
+            "updated_at",
+        ])
+        messages.success(self.request, "Template-recommendation decision-rule experiment outcome saved.")
+        return redirect("studio:report-template-recommendation-tuning-decision-rules-history")
+
+    def get_success_url(self):
+        return reverse("studio:report-template-recommendation-tuning-decision-rules-history")
+
+
+class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshotListView(StaffRequiredMixin, ListView):
+    model = ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot
+    template_name = "studio/report_template_recommendation_tuning_decision_rules_experiment_snapshots.html"
+    context_object_name = "snapshots"
+    paginate_by = 30
+
+    def get_queryset(self):
+        queryset = ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot.objects.select_related(
+            "change_log", "change_log__decision_rules", "generated_by"
+        )
+        label = self.request.GET.get("experiment_label", "").strip()
+        window_days = self.request.GET.get("window_days", "").strip()
+        if label:
+            queryset = queryset.filter(change_log__experiment_label__icontains=label)
+        if window_days.isdigit():
+            queryset = queryset.filter(window_days=int(window_days))
+        return queryset.order_by("-generated_at", "-pk")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["selected_experiment_label"] = self.request.GET.get("experiment_label", "").strip()
+        context["selected_window_days"] = self.request.GET.get("window_days", "").strip()
+        context["window_choices"] = [7, 14, 30, 60]
+        context["snapshot_count"] = context.get("paginator").count if context.get("paginator") else len(context.get("snapshots", []))
+        context["latest_snapshot"] = ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot.objects.order_by("-generated_at").first()
+        return context
+
+
+class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshotCreateView(StaffRequiredMixin, DetailView):
+    model = ReportTemplateRecommendationTuningDecisionRulesChangeLog
+    template_name = "studio/report_template_recommendation_tuning_decision_rules_experiment_snapshot_form.html"
+    context_object_name = "change_log"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["form"] = kwargs.get("form") or ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshotForm()
+        context["existing_snapshots"] = self.object.performance_snapshots.select_related("generated_by")[:10]
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        form = ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshotForm(request.POST)
+        if not form.is_valid():
+            return self.render_to_response(self.get_context_data(form=form))
+        snapshot = create_report_template_recommendation_decision_rule_experiment_snapshot(
+            change_log=self.object,
+            window_days=form.cleaned_data["window_days"],
+            generated_by=request.user if request.user.is_authenticated else None,
+            notes=form.cleaned_data.get("notes", ""),
+        )
+        messages.success(request, "Template-recommendation decision-rule experiment snapshot created.")
+        return redirect("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", pk=snapshot.pk)
+
+
+class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshotDetailView(StaffRequiredMixin, DetailView):
+    model = ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot
+    template_name = "studio/report_template_recommendation_tuning_decision_rules_experiment_snapshot_detail.html"
+    context_object_name = "snapshot"
+
+    def get_queryset(self):
+        return ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot.objects.select_related(
+            "change_log", "change_log__decision_rules", "generated_by"
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["metric_rows"] = report_template_decision_rule_snapshot_section_rows(self.object)
+        context["sections"] = _group_snapshot_rows_by_section(context["metric_rows"])
+        context["active_decision_rules"] = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        context["decision_recommendation"] = recommend_report_template_decision_rule_snapshot_decision(self.object, context["active_decision_rules"])
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        action = request.POST.get("action")
+        if action != "apply_template_decision_rule_snapshot_decision":
+            messages.error(request, "Choose a valid template-recommendation decision-rule snapshot action.")
+            return redirect("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", pk=self.object.pk)
+        apply_report_template_decision_rule_snapshot_decision_to_change_log(
+            snapshot=self.object,
+            user=request.user,
+            note=request.POST.get("decision_note", "").strip(),
+        )
+        messages.success(request, "Decision recommendation recorded on the template-recommendation decision-rule experiment.")
+        return redirect("studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-detail", pk=self.object.pk)
+
+
+class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshotExportView(StaffRequiredMixin, DetailView):
+    model = ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot
+
+    def get(self, request, *args, **kwargs):
+        snapshot = self.get_object()
+        filename = f"code-with-michael-template-decision-rule-snapshot-{snapshot.pk}.csv"
+        response = _csv_response(filename)
+        writer = csv.writer(response)
+        writer.writerow(["experiment_label", snapshot.experiment_label])
+        writer.writerow(["generated_at", snapshot.generated_at.isoformat()])
+        writer.writerow(["decision_rules_profile", snapshot.change_log.decision_rules.name])
+        writer.writerow(["window_days", snapshot.window_days])
+        recommendation = recommend_report_template_decision_rule_snapshot_decision(snapshot)
+        writer.writerow(["decision_recommendation", recommendation.label])
+        writer.writerow(["decision_confidence", recommendation.confidence])
+        writer.writerow(["decision_score", recommendation.score])
+        writer.writerow(["decision_summary", recommendation.summary])
+        writer.writerow(["decision_rules_profile", recommendation.decision_rules_name])
+        writer.writerow([])
+        writer.writerow(["weighted_signals"])
+        writer.writerow(["section", "metric", "change", "weight", "score_impact", "direction"])
+        for signal in recommendation.weighted_signals:
+            writer.writerow([signal["section"], signal["metric"], signal["change"], signal["weight"], signal["contribution"], signal["direction"]])
+        writer.writerow([])
+        writer.writerow(["section", "metric", "before", "after", "change", "percent_change"] )
+        for row in report_template_decision_rule_snapshot_section_rows(snapshot):
+            writer.writerow([
+                row["section_label"],
+                row["metric_label"],
+                row["before"],
+                row["after"],
+                row["change"],
+                row["pct"] if row["pct"] is not None else "",
+            ])
+        return response
+
+
+
+class ReportTemplateRecommendationTuningExperimentSnapshotListView(StaffRequiredMixin, ListView):
+    model = ReportTemplateRecommendationTuningExperimentSnapshot
+    template_name = "studio/report_template_recommendation_tuning_experiment_snapshots.html"
+    context_object_name = "snapshots"
+    paginate_by = 30
+
+    def get_queryset(self):
+        queryset = ReportTemplateRecommendationTuningExperimentSnapshot.objects.select_related(
+            "change_log", "change_log__tuning", "generated_by"
+        )
+        label = self.request.GET.get("experiment_label", "").strip()
+        window_days = self.request.GET.get("window_days", "").strip()
+        if label:
+            queryset = queryset.filter(change_log__experiment_label__icontains=label)
+        if window_days.isdigit():
+            queryset = queryset.filter(window_days=int(window_days))
+        return queryset.order_by("-generated_at", "-pk")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["selected_experiment_label"] = self.request.GET.get("experiment_label", "").strip()
+        context["selected_window_days"] = self.request.GET.get("window_days", "").strip()
+        context["window_choices"] = [7, 14, 30, 60]
+        context["snapshot_count"] = context.get("paginator").count if context.get("paginator") else len(context.get("snapshots", []))
+        context["latest_snapshot"] = ReportTemplateRecommendationTuningExperimentSnapshot.objects.order_by("-generated_at").first()
+        return context
+
+
+class ReportTemplateRecommendationTuningExperimentSnapshotCreateView(StaffRequiredMixin, DetailView):
+    model = ReportTemplateRecommendationTuningChangeLog
+    template_name = "studio/report_template_recommendation_tuning_experiment_snapshot_form.html"
+    context_object_name = "change_log"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["form"] = kwargs.get("form") or ReportTemplateRecommendationTuningExperimentSnapshotForm()
+        context["existing_snapshots"] = self.object.performance_snapshots.select_related("generated_by")[:10]
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        form = ReportTemplateRecommendationTuningExperimentSnapshotForm(request.POST)
+        if not form.is_valid():
+            return self.render_to_response(self.get_context_data(form=form))
+        snapshot = create_report_template_recommendation_tuning_experiment_snapshot(
+            change_log=self.object,
+            window_days=form.cleaned_data["window_days"],
+            generated_by=request.user if request.user.is_authenticated else None,
+            notes=form.cleaned_data.get("notes", ""),
+        )
+        messages.success(request, "Report-template recommendation tuning experiment snapshot created.")
+        return redirect("studio:report-template-recommendation-tuning-experiment-snapshot-detail", pk=snapshot.pk)
+
+
+class ReportTemplateRecommendationTuningExperimentSnapshotDetailView(StaffRequiredMixin, DetailView):
+    model = ReportTemplateRecommendationTuningExperimentSnapshot
+    template_name = "studio/report_template_recommendation_tuning_experiment_snapshot_detail.html"
+    context_object_name = "snapshot"
+
+    def get_queryset(self):
+        return ReportTemplateRecommendationTuningExperimentSnapshot.objects.select_related(
+            "change_log", "change_log__tuning", "generated_by"
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["metric_rows"] = report_template_snapshot_section_rows(self.object)
+        context["sections"] = _group_snapshot_rows_by_section(context["metric_rows"])
+        context["active_decision_rules"] = ReportTemplateRecommendationTuningDecisionRules.get_active()
+        context["decision_recommendation"] = recommend_report_template_tuning_decision(self.object, context["active_decision_rules"])
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        action = request.POST.get("action")
+        if action != "apply_template_recommendation_decision":
+            messages.error(request, "Choose a valid template-recommendation tuning decision action.")
+            return redirect("studio:report-template-recommendation-tuning-experiment-snapshot-detail", pk=self.object.pk)
+        apply_report_template_tuning_decision_to_change_log(
+            snapshot=self.object,
+            user=request.user,
+            note=request.POST.get("decision_note", "").strip(),
+        )
+        messages.success(request, "Decision recommendation recorded on the report-template recommendation tuning experiment.")
+        return redirect("studio:report-template-recommendation-tuning-experiment-snapshot-detail", pk=self.object.pk)
+
+
+class ReportTemplateRecommendationTuningExperimentSnapshotExportView(StaffRequiredMixin, DetailView):
+    model = ReportTemplateRecommendationTuningExperimentSnapshot
+
+    def get(self, request, *args, **kwargs):
+        snapshot = self.get_object()
+        filename = f"code-with-michael-report-template-recommendation-tuning-snapshot-{snapshot.pk}.csv"
+        response = _csv_response(filename)
+        recommendation = recommend_report_template_tuning_decision(snapshot)
+        writer = csv.writer(response)
+        writer.writerow(["decision_recommendation", recommendation.label])
+        writer.writerow(["decision_confidence", recommendation.confidence])
+        writer.writerow(["decision_score", recommendation.score])
+        writer.writerow(["decision_rules_profile", recommendation.decision_rules_name])
+        writer.writerow(["decision_rule_thresholds_json", json.dumps(recommendation.rule_thresholds)])
+        writer.writerow(["decision_summary", recommendation.summary])
+        writer.writerow([])
+        writer.writerow(["Weighted signals"])
+        writer.writerow(["section", "metric", "change", "weight", "contribution", "direction"])
+        for signal in recommendation.weighted_signals:
+            writer.writerow([
+                signal.get("section"),
+                signal.get("metric"),
+                signal.get("change"),
+                signal.get("weight"),
+                signal.get("contribution"),
+                signal.get("direction"),
+            ])
+        writer.writerow([])
+        writer.writerow(["Snapshot metrics"])
+        writer.writerow([
+            "experiment_label",
+            "generated_at",
+            "window_days",
+            "before_start",
+            "before_end",
+            "after_start",
+            "after_end",
+            "section",
+            "metric",
+            "before",
+            "after",
+            "change",
+            "percent_change",
+        ])
+        for row in report_template_snapshot_section_rows(snapshot):
+            writer.writerow([
+                snapshot.experiment_label,
+                snapshot.generated_at.isoformat(),
+                snapshot.window_days,
+                snapshot.before_start.isoformat(),
+                snapshot.before_end.isoformat(),
+                snapshot.after_start.isoformat(),
+                snapshot.after_end.isoformat(),
+                row["section_label"],
+                row["metric_label"],
+                row["before"],
+                row["after"],
+                row["change"],
+                row["pct"] if row["pct"] is not None else "",
+            ])
+        return response
+
+
+
 class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationsView(StaffRequiredMixin, TemplateView):
     template_name = "studio/experiment_decision_tuning_snapshot_comparison_report_template_recommendations.html"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         ensure_default_report_templates(self.request.user)
-        recommendations = build_report_template_recommendations(self.request.user, limit=12)
+        active_tuning = ReportTemplateRecommendationTuning.get_active()
+        recommendations = build_report_template_recommendations(self.request.user, limit=12, tuning=active_tuning)
         for recommendation in recommendations:
             record_template_recommendation_shown(recommendation, self.request.user)
         context.update({
             "recommendations": recommendations,
+            "active_tuning": active_tuning,
             "total_recommendations": len(recommendations),
             "high_priority_count": sum(1 for item in recommendations if item.priority == "High"),
             "medium_priority_count": sum(1 for item in recommendations if item.priority == "Medium"),
@@ -1345,16 +2028,18 @@ class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationsVie
 class ExperimentDecisionTuningSnapshotComparisonReportTemplateRecommendationsExportView(StaffRequiredMixin, TemplateView):
     def get(self, request, *args, **kwargs):
         ensure_default_report_templates(request.user)
-        recommendations = build_report_template_recommendations(request.user, limit=50)
+        active_tuning = ReportTemplateRecommendationTuning.get_active()
+        recommendations = build_report_template_recommendations(request.user, limit=50, tuning=active_tuning)
         response = HttpResponse(content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="decision_rule_report_template_recommendations.csv"'
         writer = csv.writer(response)
         writer.writerow([
-            "rank", "template_title", "template_type", "priority", "score", "base_score", "snapshot_focus_score", "usage_history_score", "focus_area_score", "preset_default_score", "feedback_adjustment", "recommended_window_days", "recommended_snapshot_count", "suggested_snapshot_ids", "suggested_snapshot_labels", "reasons", "feedback_notes",
+            "rank", "active_tuning", "template_title", "template_type", "priority", "score", "base_score", "snapshot_focus_score", "usage_history_score", "focus_area_score", "preset_default_score", "feedback_adjustment", "recommended_window_days", "recommended_snapshot_count", "suggested_snapshot_ids", "suggested_snapshot_labels", "reasons", "feedback_notes",
         ])
         for index, recommendation in enumerate(recommendations, start=1):
             writer.writerow([
                 index,
+                active_tuning.name,
                 recommendation.template.title,
                 recommendation.template.get_template_type_display(),
                 recommendation.priority,
@@ -2155,7 +2840,26 @@ class RecommendationTuningExperimentSnapshotExportView(StaffRequiredMixin, Detai
         snapshot = self.get_object()
         filename = f"code-with-michael-tuning-experiment-snapshot-{snapshot.pk}.csv"
         response = _csv_response(filename)
+        recommendation = recommend_report_template_tuning_decision(snapshot)
         writer = csv.writer(response)
+        writer.writerow(["decision_recommendation", recommendation.label])
+        writer.writerow(["decision_confidence", recommendation.confidence])
+        writer.writerow(["decision_score", recommendation.score])
+        writer.writerow(["decision_summary", recommendation.summary])
+        writer.writerow([])
+        writer.writerow(["Weighted signals"])
+        writer.writerow(["section", "metric", "change", "weight", "contribution", "direction"])
+        for signal in recommendation.weighted_signals:
+            writer.writerow([
+                signal.get("section"),
+                signal.get("metric"),
+                signal.get("change"),
+                signal.get("weight"),
+                signal.get("contribution"),
+                signal.get("direction"),
+            ])
+        writer.writerow([])
+        writer.writerow(["Snapshot metrics"])
         writer.writerow([
             "experiment_label",
             "generated_at",
@@ -2246,6 +2950,7 @@ def _decision_rule_snapshot_comparison(snapshots, preset_keys=None):
             "snapshot": snapshot,
             "rows": row_lookup,
             "recommendations": recommendations,
+            "active_tuning": active_tuning,
         })
 
     metric_rows = []
@@ -4451,6 +5156,40 @@ class PublicPlaygroundView(TemplateView):
 
 class HelpView(StaffRequiredMixin, TemplateView):
     template_name = "studio/help.html"
+
+
+class ProjectHealthView(StaffRequiredMixin, TemplateView):
+    template_name = "studio/project_health.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        checks = build_project_health_checks()
+        context["checks"] = checks
+        context["grouped_checks"] = grouped_project_health(checks)
+        context["summary"] = project_health_summary(checks)
+        context["generated_at"] = timezone.now()
+        return context
+
+
+class ProjectHealthExportView(StaffRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        checks = build_project_health_checks()
+        response = _csv_response("code-with-michael-project-health.csv")
+        writer = csv.writer(response)
+        writer.writerow(["generated_at", timezone.now().isoformat()])
+        writer.writerow([])
+        writer.writerow(["section", "status", "title", "detail", "count", "action_label", "action_url"])
+        for check in checks:
+            writer.writerow([
+                check.section,
+                check.status,
+                check.title,
+                check.detail,
+                check.count if check.count is not None else "",
+                check.action_label,
+                request.build_absolute_uri(check.action_url) if check.action_url else "",
+            ])
+        return response
 
 
 class LearningResourceListView(StaffRequiredMixin, ListView):

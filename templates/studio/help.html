@@ -1,6 +1,18 @@
 {% extends "base.html" %}
-{% block title %}Help and workflow guide{% endblock %}
+{% block title %}Help and workflow guide
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Template-recommendation snapshot decision rules</h2></div>
+    <p>Use <strong>Template decision rules</strong> to adjust how Studio recommends Keep, Rollback, or Keep watching for report-template recommendation tuning experiments. These rules control the score thresholds, confidence bands, metric caps, positive-signal weights, and negative-signal penalties used on template-recommendation tuning snapshots.</p>
+    <p>When you make template-ranking changes, create a snapshot after enough reports and feedback have accumulated, then review the recommendation under the active decision-rule profile.</p>
+</section>
+{% endblock %}
 {% block content %}
+
+<section class="content-card mb-4">
+    <h2>Project Health</h2>
+    <p>Use <strong>Project Health</strong> as a pre-launch and weekly maintenance checklist. It scans learner lessons, code challenges, resource lead magnets, content planning, newsletter operations, and recommendation-system configuration for items that need action or review.</p>
+</section>
+
 <div class="page-heading help-heading">
     <div><span class="eyebrow">OPERATOR GUIDE</span><h1>How to use Content Studio</h1><p>Follow one lesson from an idea to reviewed captions, downloadable graphics, and a website-ready export.</p></div>
     <a class="btn btn-primary" href="{% url 'studio:lesson-create' %}"><i class="bi bi-plus-lg"></i> Create a lesson</a>
@@ -13,8 +25,8 @@
 <section class="panel mt-4">
     <div class="panel-heading"><h2>Decision-rule experiments</h2></div>
     <p>Decision-rule presets can now be applied as named experiments. Add a label and hypothesis when testing Aggressive Growth, Conservative Quality, Balanced Learning, or Lead Magnet Focus, then record the outcome from decision-rule history after reviewing performance.</p>
-    <p><a href="{% url 'studio:experiment-decision-tuning-history' %}">Open decision-rule history</a> · <a href="{% url 'studio:experiment-decision-tuning-experiment-snapshot-compare' %}">Compare decision-rule snapshots</a> · <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-reports' %}">Saved comparison reports</a> · <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-templates' %}">Report templates</a> · <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}">Template usage analytics</a> · <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations' %}">Template recommendations</a> · <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback' %}">Template feedback</a></p>
-    <p>Use snapshot comparison when you want to inspect several decision-rule experiments or time windows at once. The comparison page shows summary deltas, full metric rows, and keep/rollback/inconclusive recommendations for the active rules plus any selected presets. Save important comparisons as named reports so they can be revisited, annotated, and exported later. Template usage analytics shows which saved report templates are producing reports and which template families lead to Keep, Roll back, Watch, or Archived decisions. Template recommendations suggest which saved report template to use next based on recent snapshots, underused template families, prior decision outcomes, and staff feedback. Mark suggestions useful, dismissed, or revisit later so future recommendations improve over time.</p>
+    <p><a href="{% url 'studio:experiment-decision-tuning-history' %}">Open decision-rule history</a> · <a href="{% url 'studio:experiment-decision-tuning-experiment-snapshot-compare' %}">Compare decision-rule snapshots</a> · <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-reports' %}">Saved comparison reports</a> · <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-templates' %}">Report templates</a> · <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-usage' %}">Template usage analytics</a> · <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendations' %}">Template recommendations</a> · <a href="{% url 'studio:experiment-decision-tuning-snapshot-comparison-report-template-recommendation-feedback' %}">Template feedback</a> · <a href="{% url 'studio:report-template-recommendation-tuning' %}">Template tuning</a> · <a href="{% url 'studio:report-template-recommendation-tuning-history' %}">Template tuning history</a> · <a href="{% url 'studio:report-template-recommendation-tuning-decision-rules-history' %}">Template decision history</a> · <a href="{% url 'studio:report-template-recommendation-tuning-decision-rules-experiment-snapshots' %}">Template decision snapshots</a></p>
+    <p>Use snapshot comparison when you want to inspect several decision-rule experiments or time windows at once. The comparison page shows summary deltas, full metric rows, and keep/rollback/inconclusive recommendations for the active rules plus any selected presets. Save important comparisons as named reports so they can be revisited, annotated, and exported later. Template usage analytics shows which saved report templates are producing reports and which template families lead to Keep, Roll back, Watch, or Archived decisions. Template recommendations suggest which saved report template to use next based on recent snapshots, underused template families, prior decision outcomes, and staff feedback. Mark suggestions useful, dismissed, or revisit later so future recommendations improve over time. Template tuning history records every scoring-weight change and gives you a safe rollback path if an experiment makes recommendations worse. Template decision history records threshold and weight changes for Keep / Roll back / Watch rules and allows safe rollback after rule experiments. Template decision snapshots compare before/after template usage, saved reports, report decisions, and recommendation feedback for those threshold experiments. Report-template recommendation tuning changes can also be labeled as experiments and later marked positive, neutral, negative, or inconclusive from the history page.</p>
     <p>Saved comparison reports now include a print-optimized view. Use <strong>Printable report</strong> from a saved report detail page when you need a clean visual summary for a meeting, browser printing, or saving as a PDF.</p>
     <p>When a report moves from analysis to action, update its report-level decision status to <strong>Keep</strong>, <strong>Roll back</strong>, <strong>Watch</strong>, or <strong>Archived</strong>. Add a short decision summary, owner, and notes so the saved report becomes a durable decision record.</p>
 </section>
@@ -145,6 +157,12 @@
     <p><a href="{% url 'studio:experiment-decision-tuning' %}">Open decision rules</a></p>
 </section>
 
+
+<section class="panel mt-4">
+    <div class="panel-heading"><h2>Template-recommendation snapshot decision rules</h2></div>
+    <p>Use <strong>Template decision rules</strong> to adjust how Studio recommends Keep, Rollback, or Keep watching for report-template recommendation tuning experiments. These rules control the score thresholds, confidence bands, metric caps, positive-signal weights, and negative-signal penalties used on template-recommendation tuning snapshots.</p>
+    <p>When you make template-ranking changes, create a snapshot after enough reports and feedback have accumulated, then review the recommendation under the active decision-rule profile.</p>
+</section>
 {% endblock %}
 
 <section class="panel mt-4">

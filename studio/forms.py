@@ -18,6 +18,12 @@ from .models import (
     Lesson,
     LearningResource,
     ResourceCTA,
+    ReportTemplateRecommendationTuning,
+    ReportTemplateRecommendationTuningChangeLog,
+    ReportTemplateRecommendationTuningDecisionRules,
+    ReportTemplateRecommendationTuningDecisionRulesChangeLog,
+    ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot,
+    ReportTemplateRecommendationTuningExperimentSnapshot,
     RecommendationTuning,
     ExperimentDecisionTuning,
     ExperimentDecisionTuningChangeLog,
@@ -67,6 +73,15 @@ class RecommendationTuningExperimentSnapshotForm(forms.Form):
 class ExperimentDecisionTuningExperimentSnapshotForm(RecommendationTuningExperimentSnapshotForm):
     """Same before/after window inputs, scoped to decision-rule experiments."""
 
+
+
+
+class ReportTemplateRecommendationTuningExperimentSnapshotForm(RecommendationTuningExperimentSnapshotForm):
+    """Same before/after window inputs, scoped to report-template recommendation tuning experiments."""
+
+
+class ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshotForm(RecommendationTuningExperimentSnapshotForm):
+    """Same before/after window inputs, scoped to report-template recommendation decision-rule experiments."""
 
 
 
@@ -547,6 +562,189 @@ class ExperimentDecisionTuningForm(StyledModelForm):
             raise forms.ValidationError("Rollback high-confidence score must be less than or equal to the rollback threshold.")
         return cleaned
 
+
+
+class ReportTemplateRecommendationTuningForm(StyledModelForm):
+    reason_note = forms.CharField(
+        required=False,
+        label="Change reason",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="Optional audit note explaining why these template-recommendation weights changed.",
+    )
+    experiment_label = forms.CharField(
+        required=False,
+        max_length=160,
+        label="Experiment label",
+        help_text="Optional. Name this tuning change as an experiment so it can be evaluated later.",
+    )
+    experiment_status = forms.ChoiceField(
+        required=False,
+        choices=ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.choices,
+        initial=ReportTemplateRecommendationTuningChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+        label="Experiment status",
+    )
+    experiment_notes = forms.CharField(
+        required=False,
+        label="Experiment hypothesis / notes",
+        widget=forms.Textarea(attrs={"rows": 2}),
+        help_text="Optional hypothesis or success criteria for this template-ranking experiment.",
+    )
+
+    class Meta:
+        model = ReportTemplateRecommendationTuning
+        fields = (
+            "name", "is_active", "base_template_score", "high_priority_threshold", "medium_priority_threshold",
+            "matching_window_weight", "matching_window_cap",
+            "unused_template_bonus", "keep_decision_weight", "keep_decision_cap",
+            "watch_decision_weight", "watch_decision_cap", "rollback_decision_penalty", "rollback_decision_cap", "underused_family_bonus",
+            "focus_area_weight", "focus_area_cap", "preset_default_weight", "preset_default_cap",
+            "exact_useful_boost", "exact_useful_cap", "exact_dismissed_penalty", "exact_dismissed_cap",
+            "exact_revisit_boost", "exact_revisit_cap", "exact_ignored_penalty", "exact_ignored_cap",
+            "similar_useful_boost", "similar_useful_cap", "similar_dismissed_penalty", "similar_dismissed_cap",
+            "similar_revisit_boost", "similar_revisit_cap", "feedback_adjustment_floor", "feedback_adjustment_ceiling", "notes",
+        )
+        widgets = {"notes": forms.Textarea(attrs={"rows": 3})}
+        help_texts = {
+            "base_template_score": "Starting score given to each active saved-report template.",
+            "high_priority_threshold": "Score at or above this value is labeled High priority.",
+            "medium_priority_threshold": "Score at or above this value is labeled Medium priority.",
+            "matching_window_weight": "Points added per recent snapshot matching the template's recommended window.",
+            "unused_template_bonus": "Bonus for active templates that have not generated reports yet.",
+            "underused_family_bonus": "Bonus when a template is underused compared with others in the same family.",
+            "feedback_adjustment_floor": "Lowest feedback adjustment allowed after useful/dismissed/revisit signals are combined.",
+            "feedback_adjustment_ceiling": "Highest feedback adjustment allowed after useful/dismissed/revisit signals are combined.",
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        high = cleaned.get("high_priority_threshold")
+        medium = cleaned.get("medium_priority_threshold")
+        floor = cleaned.get("feedback_adjustment_floor")
+        ceiling = cleaned.get("feedback_adjustment_ceiling")
+        if high is not None and medium is not None and high < medium:
+            raise forms.ValidationError("High-priority threshold must be greater than or equal to the medium-priority threshold.")
+        if floor is not None and ceiling is not None and floor > ceiling:
+            raise forms.ValidationError("Feedback floor must be less than or equal to the feedback ceiling.")
+        return cleaned
+
+
+class ReportTemplateRecommendationTuningExperimentOutcomeForm(StyledModelForm):
+    class Meta:
+        model = ReportTemplateRecommendationTuningChangeLog
+        fields = (
+            "experiment_label",
+            "experiment_status",
+            "experiment_outcome",
+            "experiment_notes",
+        )
+        widgets = {
+            "experiment_notes": forms.Textarea(attrs={"rows": 3}),
+        }
+        help_texts = {
+            "experiment_label": "Name the template-recommendation tuning experiment so it can be reviewed later.",
+            "experiment_status": "Mark whether the template-ranking experiment is planned, running, should be kept, or should be rolled back.",
+            "experiment_outcome": "Record the result once enough performance data is available.",
+            "experiment_notes": "Summarize what happened and what decision you made.",
+        }
+
+
+class ReportTemplateRecommendationTuningDecisionRulesForm(StyledModelForm):
+    change_reason = forms.CharField(
+        required=False,
+        label="Reason for change",
+        help_text="Optional note for the decision-rule audit log, such as tightening rollback rules after a test.",
+        widget=forms.Textarea(attrs={"rows": 2}),
+    )
+    experiment_label = forms.CharField(
+        required=False,
+        max_length=160,
+        label="Experiment label",
+        help_text="Optional name for this threshold test, such as September Template Decision Rules Test.",
+    )
+    experiment_status = forms.ChoiceField(
+        required=False,
+        choices=ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.choices,
+        initial=ReportTemplateRecommendationTuningDecisionRulesChangeLog.ExperimentStatus.NOT_EXPERIMENT,
+        label="Experiment status",
+    )
+    experiment_notes = forms.CharField(
+        required=False,
+        label="Experiment hypothesis / notes",
+        help_text="Optional hypothesis or tracking note for this decision-rule experiment.",
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+
+    class Meta:
+        model = ReportTemplateRecommendationTuningDecisionRules
+        fields = (
+            "name",
+            "is_active",
+            "keep_score_threshold",
+            "keep_primary_positive_min",
+            "keep_high_confidence_score",
+            "rollback_score_threshold",
+            "rollback_primary_negative_min",
+            "rollback_high_confidence_score",
+            "low_confidence_abs_score",
+            "max_metric_change_magnitude",
+            "template_usage_reports_created_weight",
+            "saved_reports_reports_created_weight",
+            "saved_reports_snapshots_attached_weight",
+            "saved_reports_presets_attached_weight",
+            "decision_keep_decisions_weight",
+            "decision_watch_decisions_weight",
+            "feedback_useful_weight",
+            "feedback_revisit_weight",
+            "feedback_total_actions_weight",
+            "decision_rollback_decisions_penalty",
+            "decision_archived_decisions_penalty",
+            "feedback_dismissed_penalty",
+            "feedback_ignored_penalty",
+            "notes",
+        )
+        widgets = {"notes": forms.Textarea(attrs={"rows": 3})}
+        help_texts = {
+            "keep_score_threshold": "Minimum score required before Studio recommends keeping a report-template recommendation tuning experiment.",
+            "keep_primary_positive_min": "Minimum number of primary positive signals needed for a keep recommendation.",
+            "keep_high_confidence_score": "Scores at or above this value show high confidence on keep recommendations.",
+            "rollback_score_threshold": "Score at or below this value triggers rollback consideration. Use a negative number.",
+            "rollback_primary_negative_min": "Minimum number of primary negative signals needed for a rollback recommendation.",
+            "rollback_high_confidence_score": "Scores at or below this value show high confidence on rollback recommendations.",
+            "low_confidence_abs_score": "Watch decisions below this absolute score are labeled low confidence.",
+            "max_metric_change_magnitude": "Caps how much any single metric can influence the final decision score.",
+        }
+
+    def clean(self):
+        cleaned = super().clean()
+        keep = cleaned.get("keep_score_threshold")
+        keep_high = cleaned.get("keep_high_confidence_score")
+        rollback = cleaned.get("rollback_score_threshold")
+        rollback_high = cleaned.get("rollback_high_confidence_score")
+        if keep is not None and keep_high is not None and keep_high < keep:
+            raise forms.ValidationError("Keep high-confidence score must be greater than or equal to the keep threshold.")
+        if rollback is not None and rollback_high is not None and rollback_high > rollback:
+            raise forms.ValidationError("Rollback high-confidence score must be less than or equal to the rollback threshold.")
+        return cleaned
+
+
+
+
+class ReportTemplateRecommendationTuningDecisionRulesExperimentOutcomeForm(StyledModelForm):
+    class Meta:
+        model = ReportTemplateRecommendationTuningDecisionRulesChangeLog
+        fields = (
+            "experiment_label",
+            "experiment_status",
+            "experiment_outcome",
+            "experiment_notes",
+        )
+        widgets = {"experiment_notes": forms.Textarea(attrs={"rows": 5})}
+        help_texts = {
+            "experiment_label": "Name the decision-rule threshold test this change belongs to.",
+            "experiment_status": "Mark whether the rule experiment is planned, running, complete, or should be rolled back.",
+            "experiment_outcome": "Record whether the test looked positive, neutral, negative, or inconclusive.",
+            "experiment_notes": "Summarize what happened and whether the rules should stay, be watched, or be rolled back.",
+        }
 
 
 class LessonIdeaForm(forms.Form):

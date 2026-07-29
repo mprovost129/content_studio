@@ -1,5 +1,73 @@
 # Code with Michael Content Studio
 
+## Complete usage instructions
+
+A full step-by-step operator guide has been added here:
+
+- `docs/SITE_USER_GUIDE.md` — complete instructions for using the public learner site and private Studio, including required vs optional selections for each major feature.
+
+Start with that guide before using the advanced reporting and recommendation tools.
+
+---
+
+
+## Phase 62: Report-template recommendation decision-rule experiment snapshots
+
+Phase 62 adds before/after experiment snapshots for report-template recommendation decision-rule changes. Staff can now evaluate whether Keep / Rollback / Watch threshold experiments affected report-template usage, saved report creation, report-level decisions, and recommendation feedback.
+
+New private Studio routes:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/decision-rules/experiments/snapshots/` — list decision-rule experiment snapshots.
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/decision-rules/history/<id>/snapshot/` — create a snapshot from a decision-rule history entry.
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/decision-rules/experiments/snapshots/<id>/` — review snapshot metrics.
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/decision-rules/experiments/snapshots/<id>/export/` — export snapshot metrics as CSV.
+
+New model and migration:
+
+- `ReportTemplateRecommendationTuningDecisionRulesExperimentSnapshot`
+- `studio/migrations/0045_report_template_recommendation_decision_rule_snapshots.py`
+
+Snapshot metrics compare 7, 14, 30, or 60 day before/after windows for template usage, saved reports, report decisions, and template recommendation feedback.
+
+
+## Phase 56: Report-template recommendation tuning experiments
+
+Phase 56 adds experiment labels and outcomes to report-template recommendation tuning changes. Staff can now treat template-ranking weight updates as named experiments, record a hypothesis when saving the tuning change, filter audit history by experiment status/outcome, and later record whether the experiment was positive, negative, neutral, or inconclusive.
+
+New migration:
+
+- `studio/migrations/0040_report_template_recommendation_tuning_experiments.py`
+
+Updated private Studio behavior:
+
+- The Template tuning form includes optional experiment label, status, and hypothesis/notes fields.
+- Template tuning history can be filtered by action, experiment status, experiment outcome, and experiment label.
+- Each tuning history row now includes a Record outcome action.
+- CSV exports include experiment labels, statuses, outcomes, notes, and outcome recorder metadata.
+- Admin now exposes experiment status/outcome filters for template-recommendation tuning logs.
+
+# Code with Michael Content Studio
+
+## Phase 54: Report-template recommendation tuning controls
+
+Phase 54 adds editable Studio controls for the saved report-template recommendation engine. Staff can now tune how strongly template suggestions respond to recent decision-rule snapshots, prior template usage, Keep / Watch / Roll back outcomes, focus areas, preset defaults, and useful/dismissed/revisit feedback.
+
+New private Studio route:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/` — edit the active report-template recommendation tuning profile.
+
+New model and migration:
+
+- `ReportTemplateRecommendationTuning`
+- `studio/migrations/0038_report_template_recommendation_tuning.py`
+
+Updated behavior:
+
+- Template recommendations use the active tuning profile instead of hard-coded values for priority thresholds, usage weights, report-decision weights, focus-area/preset bonuses, and feedback boosts or penalties.
+- Recommendation CSV exports include the active tuning profile used for the export.
+- Template recommendation pages show the active tuning profile and link directly to tuning controls.
+- Admin includes the tuning profile for quick inspection.
+
 ## Phase 48: Report-level decision status
 
 Phase 48 moves saved decision-rule snapshot comparison reports from analysis-only records into decision records. A saved report can now be marked as **No decision yet**, **Keep**, **Roll back**, **Watch**, or **Archived**, with an owner, summary, notes, recorded-by user, and recorded date.
@@ -1241,3 +1309,92 @@ The CSV export includes the recommendation rank, priority, score breakdown, sugg
 - Recommendation views now record shown/ignored signals and use that feedback to adjust future ranking.
 - Added feedback history and CSV export for reviewing recommendation quality.
 - Added admin visibility, navigation links, migration, and tests/docs for the feedback loop.
+
+### Phase 55: Report-template recommendation tuning audit logging
+
+Phase 55 adds an audit trail for the report-template recommendation tuning controls. Manual updates now create change-log entries with before/after snapshots, field-level diffs, the staff user, an optional reason note, and request path. Staff can review history, export changes to CSV, and restore either the before-change or after-change snapshot from a prior change.
+
+New private Studio routes:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/history/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/history/export/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/history/<id>/rollback/`
+
+New migration:
+
+- `0039_report_template_recommendation_tuning_change_log.py`
+
+### Phase 57 — Report-template recommendation tuning experiment snapshots
+
+Phase 57 adds before/after experiment snapshots for the report-template recommendation tuning system. Staff can open a template-recommendation tuning history record and create a 7, 14, 30, or 60 day comparison snapshot.
+
+The snapshot compares the period before and after the tuning change across:
+
+- template usage and reports created from templates
+- saved comparison reports, attached snapshots, and preset profiles
+- report decisions such as Keep, Roll back, Watch, Archived, and Undecided
+- report-template recommendation feedback such as Useful, Dismissed, Revisit later, and ignored recommendations
+
+New Studio routes include:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/experiments/snapshots/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/history/<id>/snapshot/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/experiments/snapshots/<id>/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/experiments/snapshots/<id>/export/`
+
+Run `python manage.py migrate` after pulling this phase to apply migration `0041_report_template_recommendation_tuning_snapshots.py`.
+
+### Phase 58 - Report-template recommendation tuning decisions
+
+Phase 58 adds decision recommendations for report-template recommendation tuning experiment snapshots. The snapshot detail page now reviews before/after movement in template usage, saved comparison reports, report-level decisions, and recommendation feedback, then recommends one of three actions:
+
+- **Keep changes** when template usage, useful feedback, or Keep decisions improved enough.
+- **Rollback recommended** when dismissed/ignored suggestions, rollback decisions, or weak usage signals worsened enough.
+- **Keep watching** when the data is not strong enough yet.
+
+The recommendation panel includes confidence, score, positive/negative signals, weighted score impact, recommended next steps, and a one-click action to record the recommendation on the tuning experiment outcome. Snapshot CSV exports now include the decision recommendation and weighted signal data before the metric table.
+
+
+## Phase 59 – Report-template recommendation decision rules
+
+- Added editable Studio controls for Keep / Rollback / Watch thresholds used by report-template recommendation tuning experiment snapshots.
+- Added an active decision-rule profile with positive-signal weights, negative-signal penalties, primary-signal requirements, confidence thresholds, and metric caps.
+- Connected snapshot decision recommendations to the active rule profile instead of fixed internal constants.
+- Added active-rule visibility to snapshot detail pages and CSV decision exports continue to use the active rules.
+- Added admin visibility, migration `0042_report_template_recommendation_tuning_decision_rules.py`, and test coverage for tuning stricter rules.
+
+## Phase 60 – Report-template recommendation decision-rule audit logging
+
+- Added audit logging for the report-template recommendation decision rules that control Keep / Roll back / Watch decisions.
+- Manual rule saves now capture before/after snapshots, field-level diffs, staff user, optional reason note, and request path.
+- Added decision-rule history, CSV export, and rollback review/restore screens.
+- Rollbacks are logged as new audit entries so the rule history remains complete.
+- Added admin visibility, navigation/help links, migration `0043_report_template_recommendation_decision_rule_change_log.py`, and test coverage for update logging, CSV export, and rollback restores.
+
+New private Studio routes:
+
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/decision-rules/history/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/decision-rules/history/export/`
+- `/studio/recommendations/tuning/decision-rules/experiments/snapshots/report-templates/recommendations/tuning/decision-rules/history/<id>/rollback/`
+
+
+## Phase 61 - Report-template recommendation decision-rule experiments
+
+- Added experiment labels, statuses, outcomes, notes, recorded timestamps, and recorded-by tracking to report-template recommendation decision-rule change logs.
+- Added experiment fields to the decision-rule settings form so Keep / Rollback / Watch threshold tests can be named when they are created.
+- Added a Record outcome workflow from decision-rule history for evaluating threshold experiments after results are available.
+- Added experiment status/outcome/label filters and CSV export fields to decision-rule history.
+- Added admin visibility for decision-rule experiment tracking fields.
+
+## Phase 63 — Decision Recommendations for Report-Template Recommendation Decision-Rule Snapshots
+
+- Added deterministic Keep / Rollback / Keep Watching recommendations for report-template recommendation decision-rule experiment snapshots.
+- Snapshot detail pages now show confidence, score, weighted signals, positive/negative evidence, and recommended next steps.
+- Added one-click recording of the recommendation back onto the decision-rule experiment outcome.
+- Snapshot CSV exports now include the recommendation, confidence, score, summary, active rule profile, and weighted signal rows.
+- Added `studio/services/report_template_recommendation_decision_rule_snapshot_decisions.py` and tests for rendering, recording, and export behavior.
+
+
+## Phase 64 - Project Health and Launch Readiness
+
+Phase 64 adds a private Project Health screen at `/studio/project-health/` with a CSV export at `/studio/project-health/export/`. The checklist summarizes operational readiness across public lessons, beginner learning fields, challenge validation, resource-library lead magnets, CTA coverage, planned posts, publishing metrics, newsletter setup, active recommendation profiles, open experiments, and saved comparison-report decisions. Use it before deployment and as a weekly maintenance pass while the platform grows.

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Template decision-rule history{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <div>
+        <span class="eyebrow">REPORT TEMPLATE RECOMMENDATIONS</span>
+        <h1>Template decision-rule history</h1>
+        <p>Review changes to the Keep / Roll back / Watch rules used for report-template recommendation tuning snapshots.</p>
+    </div>
+    <div class="heading-actions">
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules' %}">Decision rules</a>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules-experiment-snapshots' %}">Snapshots</a>
+        <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules-history-export' %}?action={{ selected_action }}&experiment_status={{ selected_experiment_status }}&experiment_outcome={{ selected_experiment_outcome }}&experiment_label={{ selected_experiment_label|urlencode }}">Export CSV</a>
+    </div>
+</section>
+
+<section class="panel mb-4">
+    <form method="get" class="row g-3 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label" for="action">Action</label>
+            <select class="form-select" id="action" name="action">
+                <option value="">All actions</option>
+                {% for value,label in actions %}
+                <option value="{{ value }}" {% if selected_action == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="experiment_status">Experiment status</label>
+            <select class="form-select" id="experiment_status" name="experiment_status">
+                <option value="">All statuses</option>
+                {% for value,label in experiment_statuses %}
+                <option value="{{ value }}" {% if selected_experiment_status == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="experiment_outcome">Outcome</label>
+            <select class="form-select" id="experiment_outcome" name="experiment_outcome">
+                <option value="">All outcomes</option>
+                {% for value,label in experiment_outcomes %}
+                <option value="{{ value }}" {% if selected_experiment_outcome == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="experiment_label">Experiment label</label>
+            <input class="form-control" id="experiment_label" name="experiment_label" value="{{ selected_experiment_label }}" placeholder="Search labels">
+        </div>
+        <div class="col-md-12">
+            <button class="btn btn-primary" type="submit">Filter</button>
+            <a class="btn btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules-history' %}">Reset</a>
+        </div>
+    </form>
+</section>
+
+<section class="metric-grid mb-4">
+    <div class="metric-card"><span>Total changes</span><strong>{{ total_changes }}</strong></div>
+    <div class="metric-card"><span>Latest change</span><strong>{% if latest_change %}{{ latest_change.created_at|date:"M j, Y" }}{% else %}—{% endif %}</strong></div>
+    <div class="metric-card"><span>Active experiments</span><strong>{{ active_experiment_count }}</strong></div>
+</section>
+
+<section class="panel">
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Action</th>
+                    <th>Profile</th>
+                    <th>Changed by</th>
+                    <th>Fields</th>
+                    <th>Reason</th>
+                    <th>Experiment</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in change_logs %}
+                <tr>
+                    <td>{{ log.created_at|date:"M j, Y g:i A" }}</td>
+                    <td>{{ log.get_action_display }}</td>
+                    <td>{{ log.decision_rules.name }}</td>
+                    <td>{{ log.changed_by.email|default:"—" }}</td>
+                    <td>{{ log.changed_field_count }}</td>
+                    <td>{{ log.reason|default:"—"|truncatechars:90 }}</td>
+                    <td>
+                        {% if log.is_experiment %}
+                            <strong>{{ log.experiment_label|default:"Untitled experiment" }}</strong><br>
+                            <span class="text-muted">{{ log.get_experiment_status_display }} · {{ log.get_experiment_outcome_display }}</span>
+                        {% else %}
+                            <span class="text-muted">—</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a class="btn btn-sm btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules-experiment' log.pk %}">Record outcome</a>
+                        <a class="btn btn-sm btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules-experiment-snapshot-create' log.pk %}">Create snapshot</a>
+                        <a class="btn btn-sm btn-secondary" href="{% url 'studio:report-template-recommendation-tuning-decision-rules-rollback' log.pk %}">Review / restore</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8" class="text-muted">No decision-rule changes have been logged yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
